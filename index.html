@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Guild Management</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">GM</div>
+        <div><h1>Guild Manager</h1><p>Raid & Member Control</p></div>
+      </div>
+      <nav class="nav">
+        <button class="nav-item active" data-view="members">👥 <span>Members</span></button>
+        <button class="nav-item" data-view="raids">🛡️ <span>Raid Party</span></button>
+      </nav>
+      <div class="sidebar-footer">
+        <strong>Auto-save enabled</strong>
+        <span>Browser storage + JSON backup</span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <section id="membersView" class="view active">
+        <header class="page-header">
+          <div><p class="eyebrow">Guild Roster</p><h2>Members</h2><p>Add, edit, and remove guild members.</p></div>
+          <div class="header-actions">
+            <button id="importBackupBtn" class="secondary-btn" type="button">Import JSON</button>
+            <button id="exportBackupBtn" class="secondary-btn" type="button">Export JSON</button>
+            <button id="addMemberBtn" class="primary-btn">+ Add Member</button>
+            <input id="backupFileInput" type="file" accept="application/json,.json" hidden />
+          </div>
+        </header>
+
+        <div class="toolbar">
+          <input id="memberSearch" type="search" placeholder="Search IGN or job..." />
+          <div id="memberCount" class="count-pill">0 members</div>
+        </div>
+
+        <div class="card table-card">
+          <table>
+            <thead><tr><th>Member</th><th>Job</th><th class="actions-col">Actions</th></tr></thead>
+            <tbody id="memberTableBody"></tbody>
+          </table>
+          <div id="memberEmpty" class="empty-state">No members yet. Add your first guild member.</div>
+        </div>
+      </section>
+
+      <section id="raidsView" class="view">
+        <header class="page-header">
+          <div><p class="eyebrow">Party Builder</p><h2>Raid Party</h2><p>Assign guild members to raid teams. Duplicate members are blocked within the selected raid.</p></div>
+        </header>
+
+        <div class="raid-layout">
+          <div class="raid-menu card">
+            <h3>Raid Brackets</h3>
+            <button class="raid-option active" data-raid="guildLeague"><span>Guild League</span><small>40 teams</small></button>
+            <button class="raid-option" data-raid="polarityZone"><span>Polarity Zone</span><small>34 teams</small></button>
+            <button class="raid-option" data-raid="guildSiege"><span>Guild Siege</span><small>32 teams</small></button>
+            <button class="raid-option" data-raid="mirrorWorld"><span>Mirror World</span><small>34 teams</small></button>
+          </div>
+
+          <div class="raid-content">
+            <div class="raid-titlebar card">
+              <div><p class="eyebrow">Selected Raid</p><h3 id="raidTitle">Guild League</h3></div>
+              <div class="raid-title-actions">
+                <button id="copyDiscordBtn" class="discord-btn" type="button">Copy for Discord</button>
+                <button id="downloadRaidTxtBtn" class="secondary-btn compact-btn" type="button">Download TXT</button>
+                <div class="raid-stats"><span id="raidAssigned">0 assigned</span><span id="raidCapacity">0 slots</span></div>
+              </div>
+            </div>
+            <div id="partyGroups"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="memberModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-backdrop" data-close-modal></div>
+    <div class="modal-panel">
+      <div class="modal-header"><div><p class="eyebrow">Guild Member</p><h3 id="modalTitle">Add Member</h3></div><button class="icon-btn" data-close-modal>×</button></div>
+      <form id="memberForm">
+        <label>IGN<input id="ignInput" maxlength="40" required placeholder="Enter in-game name" /></label>
+        <label>Job<select id="jobSelect" required></select></label>
+        <div class="modal-actions"><button type="button" class="secondary-btn" data-close-modal>Cancel</button><button type="submit" class="primary-btn">Save Member</button></div>
+      </form>
+    </div>
+  </div>
+
+
+  <div id="memberPicker" class="member-picker hidden" aria-hidden="true">
+    <div class="picker-search-wrap">
+      <div class="picker-search-box">
+        <span class="picker-search-icon">⌕</span>
+        <input id="pickerSearch" type="search" autocomplete="off" placeholder="Type IGN or job to search..." />
+      </div>
+    </div>
+    <div id="pickerAvailableCount" class="picker-meta">0 available</div>
+    <div id="pickerResults" class="picker-results"></div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script src="app.js"></script>
+</body>
+</html>
