@@ -48,3 +48,47 @@
 .compact-btn{padding:9px 12px}
 @media(max-width:980px){.raid-title-actions{justify-content:flex-start}}
 @media(max-width:720px){.header-actions{width:100%;justify-content:flex-start}.raid-title-actions{width:100%;justify-content:flex-start}.raid-stats{width:100%}}
+
+
+/* Class list */
+.class-layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:18px;align-items:start}
+.class-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin-bottom:14px;overflow:hidden}
+.class-summary>div{padding:15px 18px;display:flex;flex-direction:column;gap:2px;border-right:1px solid var(--line)}
+.class-summary>div:last-child{border-right:0}
+.class-summary strong{font-size:22px;line-height:1;color:#303950}
+.class-summary span{font-size:11px;color:var(--muted)}
+.class-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.class-card{border:1px solid var(--line);background:#fff;border-radius:13px;padding:12px;display:flex;align-items:center;gap:10px;text-align:left;cursor:pointer;min-width:0;box-shadow:0 4px 14px rgba(55,68,110,.035);transition:transform .12s,border-color .12s,box-shadow .12s,background .12s}
+.class-card:hover{transform:translateY(-1px);border-color:#bec7ef;box-shadow:0 8px 20px rgba(55,68,110,.07)}
+.class-card.active{background:#eef0ff;border-color:#bfc8fb;box-shadow:0 0 0 2px rgba(109,127,232,.08)}
+.class-card-icon{width:34px;height:34px;object-fit:contain;flex:0 0 34px}
+.class-card-info{display:flex;flex-direction:column;min-width:0;flex:1}
+.class-card-info strong{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.class-card-info small{font-size:10px;color:var(--muted);margin-top:2px}
+.class-count-badge{min-width:28px;height:28px;padding:0 7px;border-radius:999px;background:#f3f5fa;color:#59627a;display:grid;place-items:center;font-size:12px;font-weight:800}
+.class-card.active .class-count-badge{background:#fff;color:#5366d9}
+.class-members-panel{position:sticky;top:20px;min-height:300px;overflow:hidden}
+.class-panel-empty{min-height:300px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:28px;color:var(--muted)}
+.class-panel-empty strong{color:var(--text);font-size:16px;margin-top:8px}
+.class-panel-empty p{font-size:12px;line-height:1.5;max-width:230px;margin:7px 0 0}
+.class-panel-symbol{width:48px;height:48px;border-radius:14px;background:#eef0ff;display:grid;place-items:center;font-size:23px}
+.class-panel-header{padding:16px 17px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:12px}
+.class-panel-title{display:flex;align-items:center;gap:11px;min-width:0}
+.class-panel-title h3{margin:2px 0 0;font-size:18px}
+.class-panel-icon{width:40px;height:40px;object-fit:contain}
+.class-panel-count{min-width:34px;height:34px;padding:0 8px;border-radius:999px;background:#eef0ff;color:#5366d9;display:grid;place-items:center;font-size:13px;font-weight:900}
+.class-member-list{display:grid;max-height:calc(100vh - 210px);overflow:auto}
+.class-member-row{display:flex;align-items:center;gap:9px;padding:10px 12px;border-bottom:1px solid var(--line)}
+.class-member-row:last-child{border-bottom:0}
+.class-member-number{width:20px;text-align:center;color:#9aa2b4;font-size:10px}
+.member-avatar.small{width:30px;height:30px;font-size:10px;flex:0 0 30px}
+.class-member-name{display:flex;flex-direction:column;min-width:0;flex:1}
+.class-member-name strong{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.class-member-name small{font-size:9px;color:var(--muted);margin-top:2px}
+.action-btn.mini{padding:5px 8px;font-size:10px;margin:0}
+.class-no-members{padding:38px 22px;text-align:center;color:var(--muted)}
+.class-no-members strong{color:var(--text)}
+.class-no-members p{font-size:12px;line-height:1.5}
+@media(max-width:1250px){.class-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.class-layout{grid-template-columns:minmax(0,1fr) 300px}}
+@media(max-width:900px){.class-layout{grid-template-columns:1fr}.class-members-panel{position:static}.class-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.class-member-list{max-height:420px}}
+@media(max-width:720px){.nav{grid-template-columns:repeat(3,1fr)}.class-grid{grid-template-columns:1fr}.class-summary{grid-template-columns:1fr 1fr 1fr}.class-summary>div{padding:12px}.class-summary strong{font-size:18px}}

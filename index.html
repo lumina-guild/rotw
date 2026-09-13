@@ -15,6 +15,7 @@
       </div>
       <nav class="nav">
         <button class="nav-item active" data-view="members">👥 <span>Members</span></button>
+        <button class="nav-item" data-view="classes">📚 <span>Class List</span></button>
         <button class="nav-item" data-view="raids">🛡️ <span>Raid Party</span></button>
       </nav>
       <div class="sidebar-footer">
@@ -46,6 +47,33 @@
             <tbody id="memberTableBody"></tbody>
           </table>
           <div id="memberEmpty" class="empty-state">No members yet. Add your first guild member.</div>
+        </div>
+      </section>
+
+
+      <section id="classesView" class="view">
+        <header class="page-header">
+          <div><p class="eyebrow">Guild Composition</p><h2>Class List</h2><p>See how many members you have in each job. Click a class to view its members.</p></div>
+          <div id="classMemberTotal" class="count-pill">0 members</div>
+        </header>
+
+        <div class="class-layout">
+          <div>
+            <div class="class-summary card">
+              <div><strong id="classFilledCount">0</strong><span>Classes represented</span></div>
+              <div><strong id="classTotalCount">17</strong><span>Total classes</span></div>
+              <div><strong id="classRosterCount">0</strong><span>Guild members</span></div>
+            </div>
+            <div id="classGrid" class="class-grid"></div>
+          </div>
+
+          <aside id="classMembersPanel" class="class-members-panel card">
+            <div class="class-panel-empty">
+              <span class="class-panel-symbol">📚</span>
+              <strong>Select a class</strong>
+              <p>Click any class on the left to see all members using that job.</p>
+            </div>
+          </aside>
         </div>
       </section>
 

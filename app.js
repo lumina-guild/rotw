@@ -16,6 +16,7 @@ let members = JSON.parse(localStorage.getItem('gm_members') || '[]');
 let assignments = JSON.parse(localStorage.getItem('gm_assignments') || '{}');
 let editingId = null;
 let currentRaid = 'guildLeague';
+let selectedClass = null;
 let activePickerSlot = null;
 let activePickerButton = null;
 
@@ -55,6 +56,62 @@ function renderMembers(){
   }).join('');
 }
 
+function classCount(job){
+  return members.filter(m=>m.job===job).length;
+}
+
+function renderClassList(){
+  const total=members.length;
+  const represented=JOBS.filter(([name])=>classCount(name)>0).length;
+  $('#classMemberTotal').textContent=`${total} member${total===1?'':'s'}`;
+  $('#classFilledCount').textContent=represented;
+  $('#classTotalCount').textContent=JOBS.length;
+  $('#classRosterCount').textContent=total;
+
+  $('#classGrid').innerHTML=JOBS.map(([name,icon])=>{
+    const count=classCount(name);
+    const active=selectedClass===name?' active':'';
+    return `<button type="button" class="class-card${active}" data-class-name="${attr(name)}">
+      <img src="${iconPath(icon)}" alt="" class="class-card-icon">
+      <span class="class-card-info"><strong>${esc(name)}</strong><small>${count} member${count===1?'':'s'}</small></span>
+      <span class="class-count-badge">${count}</span>
+    </button>`;
+  }).join('');
+
+  renderSelectedClass();
+}
+
+function renderSelectedClass(){
+  const panel=$('#classMembersPanel');
+  if(!selectedClass){
+    panel.innerHTML=`<div class="class-panel-empty">
+      <span class="class-panel-symbol">📚</span>
+      <strong>Select a class</strong>
+      <p>Click any class on the left to see all members using that job.</p>
+    </div>`;
+    return;
+  }
+
+  const info=jobInfo(selectedClass);
+  const list=members.filter(m=>m.job===selectedClass).sort((a,b)=>a.ign.localeCompare(b.ign));
+  panel.innerHTML=`
+    <div class="class-panel-header">
+      <div class="class-panel-title">
+        <img src="${iconPath(info.icon)}" alt="" class="class-panel-icon">
+        <div><p class="eyebrow">Selected Class</p><h3>${esc(selectedClass)}</h3></div>
+      </div>
+      <span class="class-panel-count">${list.length}</span>
+    </div>
+    ${list.length ? `<div class="class-member-list">${list.map((m,i)=>`
+      <div class="class-member-row">
+        <span class="class-member-number">${i+1}</span>
+        <div class="member-avatar small">${initials(m.ign)}</div>
+        <div class="class-member-name"><strong>${esc(m.ign)}</strong><small>${esc(m.job)}</small></div>
+        <button type="button" class="action-btn mini" data-class-edit="${m.id}">Edit</button>
+      </div>`).join('')}</div>` : `<div class="class-no-members"><strong>No members yet</strong><p>No guild member is currently registered as ${esc(selectedClass)}.</p></div>`}
+  `;
+}
+
 function openModal(member=null){
   editingId=member?.id||null;
   $('#modalTitle').textContent=member?'Edit Member':'Add Member';
@@ -92,6 +149,7 @@ function handleMemberSubmit(e){
   }
   save();
   renderMembers();
+  renderClassList();
   renderRaid();
   closeModal();
 }
@@ -106,6 +164,7 @@ function removeMember(id){
   }));
   save();
   renderMembers();
+  renderClassList();
   renderRaid();
   toast('Member removed.');
 }
@@ -344,6 +403,7 @@ async function importBackupFile(file){
     assignments=clean.assignments;
     save();
     renderMembers();
+    renderClassList();
     renderRaid();
     toast('JSON backup imported.');
   } catch(err){
@@ -436,6 +496,7 @@ $$('.nav-item').forEach(btn=>btn.addEventListener('click',()=>{
   btn.classList.add('active');
   $$('.view').forEach(x=>x.classList.remove('active'));
   $(`#${btn.dataset.view}View`).classList.add('active');
+  if(btn.dataset.view==='classes') renderClassList();
   if(btn.dataset.view==='raids') renderRaid();
 }));
 
@@ -455,6 +516,19 @@ $('#memberTableBody').addEventListener('click',e=>{
   const remove=e.target.closest('[data-remove]');
   if(edit) openModal(members.find(x=>x.id===edit.dataset.edit));
   if(remove) removeMember(remove.dataset.remove);
+});
+
+
+$('#classGrid').addEventListener('click',e=>{
+  const card=e.target.closest('[data-class-name]');
+  if(!card) return;
+  selectedClass=card.dataset.className;
+  renderClassList();
+});
+
+$('#classMembersPanel').addEventListener('click',e=>{
+  const edit=e.target.closest('[data-class-edit]');
+  if(edit) openModal(members.find(x=>x.id===edit.dataset.classEdit));
 });
 
 $('#partyGroups').addEventListener('click',e=>{
@@ -491,4 +565,5 @@ window.addEventListener('scroll',()=>{
 
 initJobSelect();
 renderMembers();
+renderClassList();
 renderRaid();
