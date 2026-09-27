@@ -41,6 +41,17 @@ const RAIDS = {
   guildSiege:{title:'Guild Siege',groups:[['Alpha Party',8],['Beta Party',8],['Charlie Party',8],['Delta Party',8]]}
 };
 
+
+const ATTENDANCE_EVENTS = {
+  guildBanquet:{title:'Guild Banquet',slots:[{day:2,time:'21:00–21:20'}]},
+  guildLeague:{title:'Guild League',slots:[{day:2,time:'21:30–21:55'},{day:2,time:'22:00–22:25'},{day:4,time:'22:00–22:25'}]},
+  mirrorWorld:{title:'Mirror World',slots:[{day:4,time:'21:00–21:15'}]},
+  hazyForest:{title:'Hazy Forest',slots:[{day:4,time:'21:30–21:45'}]},
+  polarityZone:{title:'Polarity Zone',slots:[{day:0,time:'12:00–21:00'}]},
+  guildSiege:{title:'Siege',slots:[{day:0,time:'21:00–22:00'}]}
+};
+const DAY_NAMES=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
 const SUPABASE_URL = window.ROTW_CONFIG?.SUPABASE_URL || '';
 const SUPABASE_ANON_KEY = window.ROTW_CONFIG?.SUPABASE_ANON_KEY || '';
 const GUILD_ID = window.ROTW_CONFIG?.GUILD_ID || 'rotw-main';
@@ -50,6 +61,7 @@ const supabaseClient = (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase)
 
 let members = [];
 let assignments = {};
+let attendance = [];
 let editingId = null;
 let currentRaid = 'guildLeague';
 let selectedClass = null;
@@ -64,6 +76,8 @@ let pollTimer = null;
 let auditLogs = [];
 let accounts = [];
 let snapshots = [];
+let editingAttendanceId = null;
+let attendanceDraftAbsent = new Set();
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -72,6 +86,7 @@ const iconPath = key => `resources/${key}.png`;
 function cacheLocal(){
   sessionStorage.setItem('gm_members', JSON.stringify(members));
   sessionStorage.setItem('gm_assignments', JSON.stringify(assignments));
+  sessionStorage.setItem('gm_attendance', JSON.stringify(attendance));
 }
 function clearLocalSession(){
   sessionToken='';
@@ -79,8 +94,9 @@ function clearLocalSession(){
   localStorage.removeItem('gm_session_token');
   sessionStorage.removeItem('gm_members');
   sessionStorage.removeItem('gm_assignments');
-  members=[]; assignments={};
-  renderMembers?.(); renderClassList?.(); renderRaid?.();
+  sessionStorage.removeItem('gm_attendance');
+  members=[]; assignments={}; attendance=[];
+  renderMembers?.(); renderClassList?.(); renderRaid?.(); renderAttendance?.();
 }
 
 function requireSupabase(){
@@ -112,11 +128,13 @@ function applyRemoteState(row){
   if(!row) return;
   members=Array.isArray(row.members)?row.members:[];
   assignments=row.assignments && typeof row.assignments==='object' && !Array.isArray(row.assignments) ? row.assignments : {};
+  attendance=Array.isArray(row.attendance)?row.attendance:[];
   remoteUpdatedAt=row.updated_at||remoteUpdatedAt;
   cacheLocal();
   renderMembers();
   renderClassList();
   renderRaid();
+  renderAttendance();
 }
 async function loadSharedState(silent=false){
   if(!sessionToken) return;
@@ -152,6 +170,7 @@ async function saveState(actionType='State Updated',target='',details={},makeSna
       p_guild_id:GUILD_ID,
       p_members:members,
       p_assignments:assignments,
+      p_attendance:attendance,
       p_action_type:actionType,
       p_target:target||'',
       p_details:details||{},
@@ -857,6 +876,7 @@ $$('.nav-item').forEach(btn=>btn.addEventListener('click',()=>{
   $(`#${btn.dataset.view}View`).classList.add('active');
   if(btn.dataset.view==='classes') renderClassList();
   if(btn.dataset.view==='raids') renderRaid();
+  if(btn.dataset.view==='attendance') renderAttendance();
   if(btn.dataset.view==='logs') loadLogs();
   if(btn.dataset.view==='accounts'){ loadAccounts(); loadSnapshots(); }
 }));
@@ -916,6 +936,7 @@ document.addEventListener('keydown',e=>{
     closeModal();
     closeMemberPicker();
     if(!$('#csvSyncModal').classList.contains('hidden')) closeRosterSyncPreview();
+    if(!$('#attendanceModal').classList.contains('hidden')) closeAttendanceModal();
   }
 });
 window.addEventListener('resize',()=>{
@@ -924,6 +945,182 @@ window.addEventListener('resize',()=>{
 window.addEventListener('scroll',()=>{
   if(activePickerSlot) positionMemberPicker();
 },true);
+
+
+function attendanceDateDay(dateStr){
+  if(!dateStr) return null;
+  const d=new Date(`${dateStr}T12:00:00`);
+  return Number.isNaN(d.getTime())?null:d.getDay();
+}
+function attendanceValidSlots(eventKey,dateStr){
+  const ev=ATTENDANCE_EVENTS[eventKey];
+  if(!ev) return [];
+  const day=attendanceDateDay(dateStr);
+  if(day===null) return [];
+  return ev.slots.filter(s=>s.day===day);
+}
+function attendanceRate(rec){
+  const total=Array.isArray(rec.rosterSnapshot)?rec.rosterSnapshot.length:0;
+  const absent=Array.isArray(rec.absentIds)?rec.absentIds.length:0;
+  return total ? Math.max(0,((total-absent)/total)*100) : 0;
+}
+function attendanceAbsentNames(rec){
+  const roster=Array.isArray(rec.rosterSnapshot)?rec.rosterSnapshot:[];
+  const ids=new Set(Array.isArray(rec.absentIds)?rec.absentIds:[]);
+  return roster.filter(x=>ids.has(x.id)).map(x=>x.ign);
+}
+function formatAttendanceDate(dateStr){
+  if(!dateStr) return '—';
+  const d=new Date(`${dateStr}T12:00:00`);
+  return Number.isNaN(d.getTime())?dateStr:d.toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'});
+}
+function renderAttendance(){
+  if(!$('#attendanceTableBody')) return;
+  const q=$('#attendanceSearch')?.value.trim().toLowerCase()||'';
+  const eventFilter=$('#attendanceEventFilter')?.value||'';
+  const dateFilter=$('#attendanceDateFilter')?.value||'';
+  const rows=[...attendance].sort((a,b)=>`${b.date||''} ${b.createdAt||''}`.localeCompare(`${a.date||''} ${a.createdAt||''}`)).filter(r=>{
+    const names=attendanceAbsentNames(r).join(' ');
+    return (!eventFilter||r.eventKey===eventFilter) && (!dateFilter||r.date===dateFilter) &&
+      `${r.eventName||''} ${r.schedule||''} ${names} ${r.recordedBy||''}`.toLowerCase().includes(q);
+  });
+  $('#attendanceRecordCount').textContent=attendance.length.toLocaleString();
+  $('#attendanceLatestRoster').textContent=members.length.toLocaleString();
+  const avg=attendance.length?attendance.reduce((s,r)=>s+attendanceRate(r),0)/attendance.length:null;
+  $('#attendanceAverageRate').textContent=avg===null?'—':`${avg.toFixed(1)}%`;
+  $('#attendanceEmpty').style.display=rows.length?'none':'block';
+  $('#attendanceTableBody').innerHTML=rows.map(r=>{
+    const total=Array.isArray(r.rosterSnapshot)?r.rosterSnapshot.length:0;
+    const absent=Array.isArray(r.absentIds)?r.absentIds.length:0;
+    const absentNames=attendanceAbsentNames(r);
+    return `<tr>
+      <td><strong>${esc(formatAttendanceDate(r.date))}</strong></td>
+      <td>${esc(r.eventName||ATTENDANCE_EVENTS[r.eventKey]?.title||r.eventKey||'—')}</td>
+      <td>${esc(r.schedule||'—')}</td>
+      <td>${total}</td>
+      <td><button class="attendance-absent-btn" type="button" data-view-attendance="${attr(r.id)}" title="${attr(absentNames.join(', ')||'No absentees')}">${absent}</button></td>
+      <td><span class="attendance-rate">${attendanceRate(r).toFixed(1)}%</span></td>
+      <td>${esc(r.recordedBy||'—')}</td>
+      <td class="actions"><button class="action-btn" data-edit-attendance="${attr(r.id)}">Edit</button>${currentUser?.role==='developer'?`<button class="action-btn danger" data-delete-attendance="${attr(r.id)}">Delete</button>`:''}</td>
+    </tr>`;
+  }).join('');
+}
+function initAttendanceControls(){
+  if(!$('#attendanceEventInput')) return;
+  const options=Object.entries(ATTENDANCE_EVENTS).map(([k,v])=>`<option value="${k}">${esc(v.title)}</option>`).join('');
+  $('#attendanceEventInput').innerHTML=options;
+  $('#attendanceEventFilter').innerHTML='<option value="">All events</option>'+options;
+}
+function updateAttendanceSlotOptions(){
+  const eventKey=$('#attendanceEventInput').value;
+  const dateStr=$('#attendanceDateInput').value;
+  const all=ATTENDANCE_EVENTS[eventKey]?.slots||[];
+  const valid=attendanceValidSlots(eventKey,dateStr);
+  const select=$('#attendanceSlotInput');
+  const hint=$('#attendanceScheduleHint');
+  if(!dateStr){
+    select.innerHTML='<option value="">Select a date first</option>';
+    select.disabled=true;
+    hint.textContent=`Schedule: ${all.map(s=>`${DAY_NAMES[s.day]} ${s.time}`).join(' · ')}`;
+    return;
+  }
+  if(!valid.length){
+    select.innerHTML='<option value="">No scheduled event on this date</option>';
+    select.disabled=true;
+    hint.textContent=`This event runs on ${[...new Set(all.map(s=>DAY_NAMES[s.day]))].join(' / ')}. Please choose a matching date.`;
+    return;
+  }
+  select.disabled=false;
+  select.innerHTML=valid.map(s=>`<option value="${attr(s.time)}">${esc(s.time)}</option>`).join('');
+  hint.textContent=`${DAY_NAMES[attendanceDateDay(dateStr)]} schedule`;
+}
+function renderAttendanceMemberList(){
+  const q=$('#attendanceMemberSearch').value.trim().toLowerCase();
+  const existing=attendance.find(x=>x.id===editingAttendanceId);
+  const source=existing?.rosterSnapshot?.length
+    ? existing.rosterSnapshot.map(x=>({id:x.id,ign:x.ign,job:x.job||members.find(m=>m.id===x.id)?.job||''}))
+    : members;
+  const list=source.filter(m=>`${m.ign} ${m.job||''}`.toLowerCase().includes(q)).sort((a,b)=>a.ign.localeCompare(b.ign,undefined,{numeric:true,sensitivity:'base'}));
+  $('#attendanceAbsentCount').textContent=`${attendanceDraftAbsent.size} selected`;
+  $('#attendanceMemberList').innerHTML=list.length?list.map(m=>`<label class="attendance-member-option">
+    <input type="checkbox" value="${attr(m.id)}" ${attendanceDraftAbsent.has(m.id)?'checked':''}>
+    <span class="member-avatar small">${initials(m.ign)}</span>
+    <span><strong>${esc(m.ign)}</strong><small>${esc(m.job)}</small></span>
+  </label>`).join(''):'<div class="attendance-member-empty">No matching members.</div>';
+}
+function openAttendanceModal(record=null){
+  editingAttendanceId=record?.id||null;
+  attendanceDraftAbsent=new Set(record?.absentIds||[]);
+  $('#attendanceModalTitle').textContent=record?'Edit Attendance':'Record Attendance';
+  $('#attendanceEventInput').value=record?.eventKey||'guildBanquet';
+  $('#attendanceDateInput').value=record?.date||new Date().toISOString().slice(0,10);
+  updateAttendanceSlotOptions();
+  if(record?.schedule && [...$('#attendanceSlotInput').options].some(o=>o.value===record.schedule)) $('#attendanceSlotInput').value=record.schedule;
+  $('#attendanceMemberSearch').value='';
+  renderAttendanceMemberList();
+  $('#attendanceModal').classList.remove('hidden');
+  $('#attendanceModal').setAttribute('aria-hidden','false');
+}
+function closeAttendanceModal(){
+  $('#attendanceModal').classList.add('hidden');
+  $('#attendanceModal').setAttribute('aria-hidden','true');
+  editingAttendanceId=null;
+  attendanceDraftAbsent=new Set();
+}
+async function handleAttendanceSubmit(e){
+  e.preventDefault();
+  const eventKey=$('#attendanceEventInput').value;
+  const ev=ATTENDANCE_EVENTS[eventKey];
+  const date=$('#attendanceDateInput').value;
+  const schedule=$('#attendanceSlotInput').value;
+  const valid=attendanceValidSlots(eventKey,date).some(s=>s.time===schedule);
+  if(!ev || !date || !schedule || !valid){ toast('Please use a valid event date and scheduled time.'); return; }
+  const now=new Date().toISOString();
+  const existing=attendance.find(x=>x.id===editingAttendanceId);
+  const absentIds=[...attendanceDraftAbsent];
+  if(!existing && attendance.some(x=>x.eventKey===eventKey && x.date===date && x.schedule===schedule)){
+    toast('Attendance for this event/date/time already exists. Edit the existing record instead.');
+    return;
+  }
+  if(existing){
+    const before={event:existing.eventName,date:existing.date,schedule:existing.schedule,absent:attendanceAbsentNames(existing)};
+    existing.eventKey=eventKey; existing.eventName=ev.title; existing.date=date; existing.schedule=schedule;
+    existing.absentIds=absentIds; existing.updatedAt=now; existing.updatedBy=currentUser?.username||'';
+    const snapshotIds=new Set((existing.rosterSnapshot||[]).map(x=>x.id));
+    for(const m of members) if(absentIds.includes(m.id) && !snapshotIds.has(m.id)) existing.rosterSnapshot.push({id:m.id,ign:m.ign,job:m.job});
+    const after={event:ev.title,date,schedule,absent:attendanceAbsentNames(existing)};
+    renderAttendance(); closeAttendanceModal();
+    if(await saveState('Attendance Updated',`${ev.title} · ${date}`,{before,after},false)) toast('Attendance updated.');
+  }else{
+    const rec={
+      id:crypto.randomUUID(),eventKey,eventName:ev.title,date,schedule,
+      rosterSnapshot:members.map(m=>({id:m.id,ign:m.ign,job:m.job})),
+      absentIds,createdAt:now,updatedAt:now,recordedBy:currentUser?.username||'',recordedRole:currentUser?.role||''
+    };
+    attendance.push(rec);
+    renderAttendance(); closeAttendanceModal();
+    if(await saveState('Attendance Recorded',`${ev.title} · ${date}`,{
+      schedule,totalMembers:rec.rosterSnapshot.length,absentCount:absentIds.length,absent:attendanceAbsentNames(rec)
+    },false)) toast('Attendance recorded.');
+  }
+}
+async function deleteAttendanceRecord(id){
+  if(currentUser?.role!=='developer') return;
+  const rec=attendance.find(x=>x.id===id);
+  if(!rec) return;
+  if(!confirm(`Delete ${rec.eventName} attendance for ${formatAttendanceDate(rec.date)}?\n\nThis deletion will be recorded in Logs.`)) return;
+  attendance=attendance.filter(x=>x.id!==id);
+  renderAttendance();
+  if(await saveState('Attendance Deleted',`${rec.eventName} · ${rec.date}`,{
+    schedule:rec.schedule,totalMembers:rec.rosterSnapshot?.length||0,absentCount:rec.absentIds?.length||0,absent:attendanceAbsentNames(rec)
+  },true)) toast('Attendance record deleted.');
+}
+function viewAttendanceRecord(id){
+  const rec=attendance.find(x=>x.id===id);
+  if(!rec) return;
+  const names=attendanceAbsentNames(rec);
+  alert(`${rec.eventName}\n${formatAttendanceDate(rec.date)} · ${rec.schedule}\n\nRoster: ${rec.rosterSnapshot?.length||0}\nAbsent: ${names.length}\nAttendance: ${attendanceRate(rec).toFixed(1)}%\n\nAbsent members:\n${names.length?names.join('\n'):'None'}`);
+}
 
 function formatLogDetails(details){
   if(!details || typeof details!=='object') return '—';
@@ -1010,6 +1207,32 @@ async function resetAccountPassword(id,name){
   catch(err){ alert(err.message||'Could not reset password.'); }
 }
 
+
+$('#recordAttendanceBtn').addEventListener('click',()=>openAttendanceModal());
+$('#attendanceSearch').addEventListener('input',renderAttendance);
+$('#attendanceEventFilter').addEventListener('change',renderAttendance);
+$('#attendanceDateFilter').addEventListener('change',renderAttendance);
+$('#clearAttendanceFiltersBtn').addEventListener('click',()=>{ $('#attendanceSearch').value=''; $('#attendanceEventFilter').value=''; $('#attendanceDateFilter').value=''; renderAttendance(); });
+$('#attendanceEventInput').addEventListener('change',updateAttendanceSlotOptions);
+$('#attendanceDateInput').addEventListener('change',updateAttendanceSlotOptions);
+$('#attendanceMemberSearch').addEventListener('input',renderAttendanceMemberList);
+$('#attendanceMemberList').addEventListener('change',e=>{
+  const cb=e.target.closest('input[type="checkbox"]');
+  if(!cb) return;
+  if(cb.checked) attendanceDraftAbsent.add(cb.value); else attendanceDraftAbsent.delete(cb.value);
+  $('#attendanceAbsentCount').textContent=`${attendanceDraftAbsent.size} selected`;
+});
+$('#attendanceForm').addEventListener('submit',handleAttendanceSubmit);
+$$('[data-close-attendance]').forEach(x=>x.addEventListener('click',closeAttendanceModal));
+$('#attendanceTableBody').addEventListener('click',e=>{
+  const edit=e.target.closest('[data-edit-attendance]');
+  const del=e.target.closest('[data-delete-attendance]');
+  const view=e.target.closest('[data-view-attendance]');
+  if(edit) openAttendanceModal(attendance.find(x=>x.id===edit.dataset.editAttendance));
+  if(del) deleteAttendanceRecord(del.dataset.deleteAttendance);
+  if(view) viewAttendanceRecord(view.dataset.viewAttendance);
+});
+
 $('#loginForm').addEventListener('submit',async e=>{
   e.preventDefault(); authMessage('Signing in...');
   try{ await login($('#loginUsername').value.trim(),$('#loginPassword').value); authMessage(''); }
@@ -1039,7 +1262,7 @@ $('#accountsTableBody').addEventListener('click',e=>{
 });
 
 async function initApp(){
-  initJobSelect(); renderMembers(); renderClassList(); renderRaid(); showAuth();
+  initJobSelect(); initAttendanceControls(); renderMembers(); renderClassList(); renderRaid(); renderAttendance(); showAuth();
   if(!supabaseClient){ authMessage('Supabase is not configured. Update config.js first.',true); return; }
   try{
     if(await restoreSession()) return;

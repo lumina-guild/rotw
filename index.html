@@ -41,6 +41,7 @@
         <button class="nav-item active" data-view="members">👥 <span>Members</span></button>
         <button class="nav-item" data-view="classes">📚 <span>Class List</span></button>
         <button class="nav-item" data-view="raids">🛡️ <span>Raid Party</span></button>
+        <button class="nav-item" data-view="attendance">📅 <span>Attendance</span></button>
         <button class="nav-item" data-view="logs">🧾 <span>Logs</span></button>
         <button id="accountsNav" class="nav-item hidden" data-view="accounts">🔐 <span>Accounts</span></button>
       </nav>
@@ -129,6 +130,34 @@
         </div>
       </section>
 
+
+      <section id="attendanceView" class="view">
+        <header class="page-header">
+          <div><p class="eyebrow">Event Tracking</p><h2>Attendance</h2><p>Record only the members who were absent. Everyone else in that roster snapshot is counted as attended.</p></div>
+          <button id="recordAttendanceBtn" class="primary-btn" type="button">+ Record Attendance</button>
+        </header>
+        <div class="attendance-summary">
+          <div class="card attendance-stat"><span>Records</span><strong id="attendanceRecordCount">0</strong></div>
+          <div class="card attendance-stat"><span>Latest Roster</span><strong id="attendanceLatestRoster">0</strong></div>
+          <div class="card attendance-stat"><span>Average Attendance</span><strong id="attendanceAverageRate">—</strong></div>
+        </div>
+        <div class="toolbar attendance-toolbar">
+          <input id="attendanceSearch" type="search" placeholder="Search event or absent member..." />
+          <div class="attendance-filters">
+            <select id="attendanceEventFilter"><option value="">All events</option></select>
+            <input id="attendanceDateFilter" type="date" />
+            <button id="clearAttendanceFiltersBtn" class="secondary-btn compact-btn" type="button">Clear</button>
+          </div>
+        </div>
+        <div class="card table-card">
+          <table id="attendanceTable">
+            <thead><tr><th>Date</th><th>Event</th><th>Schedule</th><th>Roster</th><th>Absent</th><th>Attendance</th><th>Recorded By</th><th class="actions-col">Actions</th></tr></thead>
+            <tbody id="attendanceTableBody"></tbody>
+          </table>
+          <div id="attendanceEmpty" class="empty-state">No attendance records yet.</div>
+        </div>
+      </section>
+
       <section id="logsView" class="view">
         <header class="page-header">
           <div><p class="eyebrow">Audit Trail</p><h2>Logs</h2><p>Read-only history of roster, raid-party, CSV sync, and account changes.</p></div>
@@ -193,6 +222,34 @@
       <div class="sync-note">IGN spelling, symbols, spaces, capitalization and Japanese characters will follow the CSV exactly. A blank in-game IGN is stored as <strong>_</strong> on the website. Removed members are also cleared from raid-party slots.</div>
       <div id="syncChanges" class="sync-changes"></div>
       <div class="modal-actions"><button type="button" class="secondary-btn" data-close-csv-sync>Cancel</button><button id="confirmCsvSyncBtn" type="button" class="primary-btn">Confirm & Sync to Supabase</button></div>
+    </div>
+  </div>
+
+
+  <div id="attendanceModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-backdrop" data-close-attendance></div>
+    <div class="modal-panel attendance-modal-panel">
+      <div class="modal-header">
+        <div><p class="eyebrow">Guild Event</p><h3 id="attendanceModalTitle">Record Attendance</h3><p class="sync-subtitle">Select only members who did not attend.</p></div>
+        <button class="icon-btn" type="button" data-close-attendance>×</button>
+      </div>
+      <form id="attendanceForm">
+        <div class="attendance-form-grid">
+          <label>Event<select id="attendanceEventInput" required></select></label>
+          <label>Date<input id="attendanceDateInput" type="date" required /></label>
+        </div>
+        <label>Scheduled Time<select id="attendanceSlotInput" required></select></label>
+        <div id="attendanceScheduleHint" class="attendance-schedule-hint"></div>
+        <div class="attendance-roster-head">
+          <div><strong>Absent Members</strong><span id="attendanceAbsentCount">0 selected</span></div>
+          <input id="attendanceMemberSearch" type="search" placeholder="Search IGN or job..." />
+        </div>
+        <div id="attendanceMemberList" class="attendance-member-list"></div>
+        <div class="modal-actions">
+          <button type="button" class="secondary-btn" data-close-attendance>Cancel</button>
+          <button type="submit" class="primary-btn">Save Attendance</button>
+        </div>
+      </form>
     </div>
   </div>
 
