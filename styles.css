@@ -208,3 +208,7 @@
 .overview-no-member small{grid-column:2}
 @media(max-width:1100px){.overview-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.overview-class-card:nth-child(3n){border-right:1px solid var(--line)}.overview-class-card:nth-child(2n){border-right:0}}
 @media(max-width:720px){.overview-summary{grid-template-columns:1fr}.overview-grid{grid-template-columns:1fr}.overview-class-card{border-right:0!important}.overview-family-head{align-items:flex-start}.overview-family-head>span{text-align:right}}
+
+/* Read-only Member account */
+.slot-picker.readonly,.slot-picker.readonly:hover{cursor:default;background:#fbfcff;border-color:var(--line);box-shadow:none;opacity:1}
+.role-badge.member{background:#eef8f3;color:#397a5b}

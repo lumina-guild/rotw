@@ -133,8 +133,22 @@ function showApp(){
   $('#authScreen').classList.add('hidden');
   $('#appShell').classList.remove('hidden');
   $('#currentUsername').textContent=currentUser?.username||'—';
-  $('#currentRole').textContent=currentUser?.role==='developer'?'Developer':'Officer';
-  $('#accountsNav').classList.toggle('hidden',currentUser?.role!=='developer');
+  const role=currentUser?.role||'officer';
+  $('#currentRole').textContent=role==='developer'?'Developer':role==='member'?'Member':'Officer';
+  const memberMode=role==='member';
+  $$('.nav-item').forEach(btn=>{
+    if(btn.id==='accountsNav') return;
+    btn.classList.toggle('hidden',memberMode && btn.dataset.view!=='raids');
+  });
+  $('#accountsNav').classList.toggle('hidden',role!=='developer');
+  if(memberMode){
+    closeMemberPicker();
+    $$('.nav-item').forEach(x=>x.classList.remove('active'));
+    const raidNav=$('.nav-item[data-view="raids"]');
+    if(raidNav) raidNav.classList.add('active');
+    $$('.view').forEach(x=>x.classList.remove('active'));
+    $('#raidsView')?.classList.add('active');
+  }
 }
 function applyRemoteState(row){
   if(!row) return;
@@ -176,6 +190,10 @@ function startSharedPolling(){
   pollTimer=setInterval(pollSharedState,5000);
 }
 async function saveState(actionType='State Updated',target='',details={},makeSnapshot=false){
+  if(currentUser?.role==='member'){
+    toast('Member access is read-only.');
+    return false;
+  }
   cacheLocal();
   try{
     const result=await rpc('gm_save_state_v2',{
@@ -446,18 +464,19 @@ function assignedIdsForRaid(key){ ensureRaidStore(key); return Object.values(ass
 
 function renderSlotPicker(slotKey, memberId){
   const m=members.find(x=>x.id===memberId);
+  const readOnly=currentUser?.role==='member';
   if(!m){
-    return `<button type="button" class="slot-picker empty" data-slot="${attr(slotKey)}" aria-label="Choose member">
+    return `<button type="button" class="slot-picker empty ${readOnly?'readonly':''}" data-slot="${attr(slotKey)}" aria-label="${readOnly?'Empty raid slot':'Choose member'}" ${readOnly?'disabled':''}>
       <span class="slot-empty-icon">⌕</span>
-      <span class="slot-picker-text"><strong>— Empty —</strong><small>Click to search member</small></span>
-      <span class="slot-chevron">⌄</span>
+      <span class="slot-picker-text"><strong>— Empty —</strong><small>${readOnly?'Unassigned':'Click to search member'}</small></span>
+      ${readOnly?'':'<span class="slot-chevron">⌄</span>'}
     </button>`;
   }
   const j=jobInfo(m.job);
-  return `<button type="button" class="slot-picker" data-slot="${attr(slotKey)}" aria-label="Change ${attr(m.ign)}">
+  return `<button type="button" class="slot-picker ${readOnly?'readonly':''}" data-slot="${attr(slotKey)}" aria-label="${readOnly?attr(m.ign):`Change ${attr(m.ign)}`}" ${readOnly?'disabled':''}>
     <img class="slot-job-icon" src="${iconPath(j.icon)}" alt="">
     <span class="slot-picker-text"><strong>${esc(m.ign)}</strong><small>${esc(m.job)}</small></span>
-    <span class="slot-chevron">⌄</span>
+    ${readOnly?'':'<span class="slot-chevron">⌄</span>'}
   </button>`;
 }
 
@@ -565,6 +584,7 @@ function renderPickerResults(){
 }
 
 async function assignMemberToSlot(slotKey,newId){
+  if(currentUser?.role==='member') return false;
   ensureRaidStore(currentRaid);
   const oldId=assignments[currentRaid][slotKey]||'';
   if(newId){
@@ -922,6 +942,7 @@ $('#copyDiscordBtn').addEventListener('click',copyRaidForDiscord);
 $('#downloadRaidTxtBtn').addEventListener('click',downloadRaidTxt);
 
 $$('.nav-item').forEach(btn=>btn.addEventListener('click',()=>{
+  if(currentUser?.role==='member' && btn.dataset.view!=='raids') return;
   closeMemberPicker();
   $$('.nav-item').forEach(x=>x.classList.remove('active'));
   btn.classList.add('active');
@@ -967,6 +988,7 @@ $('#classMembersPanel').addEventListener('click',e=>{
 });
 
 $('#partyGroups').addEventListener('click',e=>{
+  if(currentUser?.role==='member') return;
   const pickerBtn=e.target.closest('.slot-picker[data-slot]');
   if(!pickerBtn) return;
   if(activePickerSlot===pickerBtn.dataset.slot){ closeMemberPicker(); return; }
