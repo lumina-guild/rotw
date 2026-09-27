@@ -48,11 +48,8 @@ const supabaseClient = (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase)
   ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
   : null;
 
-let members = JSON.parse(localStorage.getItem('gm_members') || '[]');
-let assignments = JSON.parse(localStorage.getItem('gm_assignments') || '{}');
-let realtimeChannel = null;
-let remoteReady = false;
-let saveTimer = null;
+let members = [];
+let assignments = {};
 let editingId = null;
 let currentRaid = 'guildLeague';
 let selectedClass = null;
@@ -60,85 +57,155 @@ let activePickerSlot = null;
 let activePickerButton = null;
 let memberSort = {key:'ign',dir:'asc'};
 let pendingRosterSync = null;
+let currentUser = null;
+let sessionToken = localStorage.getItem('gm_session_token') || '';
+let remoteUpdatedAt = null;
+let pollTimer = null;
+let auditLogs = [];
+let accounts = [];
+let snapshots = [];
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const iconPath = key => `resources/${key}.png`;
+
 function cacheLocal(){
-  localStorage.setItem('gm_members', JSON.stringify(members));
-  localStorage.setItem('gm_assignments', JSON.stringify(assignments));
+  sessionStorage.setItem('gm_members', JSON.stringify(members));
+  sessionStorage.setItem('gm_assignments', JSON.stringify(assignments));
+}
+function clearLocalSession(){
+  sessionToken='';
+  currentUser=null;
+  localStorage.removeItem('gm_session_token');
+  sessionStorage.removeItem('gm_members');
+  sessionStorage.removeItem('gm_assignments');
+  members=[]; assignments={};
+  renderMembers?.(); renderClassList?.(); renderRaid?.();
 }
 
-async function pushStateToSupabase(){
-  if(!supabaseClient) return;
-  const payload={
-    id:GUILD_ID,
-    members,
-    assignments,
-    updated_at:new Date().toISOString()
-  };
-  const {error}=await supabaseClient.from('guild_state').upsert(payload,{onConflict:'id'});
-  if(error){
-    console.error('Supabase save failed:',error);
-    toast('Saved locally, but Supabase sync failed.');
-  }
+function requireSupabase(){
+  if(!supabaseClient) throw new Error('Supabase is not configured. Check config.js.');
 }
-
-const save = () => {
-  cacheLocal();
-  if(!supabaseClient) return;
-  clearTimeout(saveTimer);
-  saveTimer=setTimeout(()=>pushStateToSupabase(),120);
-};
-
+async function rpc(name,args={}){
+  requireSupabase();
+  const {data,error}=await supabaseClient.rpc(name,args);
+  if(error) throw error;
+  return data;
+}
+function authMessage(msg,isError=false){
+  const el=$('#authStatus');
+  el.textContent=msg||'';
+  el.classList.toggle('error',!!isError);
+}
+function showAuth(){
+  $('#authScreen').classList.remove('hidden');
+  $('#appShell').classList.add('hidden');
+}
+function showApp(){
+  $('#authScreen').classList.add('hidden');
+  $('#appShell').classList.remove('hidden');
+  $('#currentUsername').textContent=currentUser?.username||'—';
+  $('#currentRole').textContent=currentUser?.role==='developer'?'Developer':'Officer';
+  $('#accountsNav').classList.toggle('hidden',currentUser?.role!=='developer');
+}
 function applyRemoteState(row){
   if(!row) return;
   members=Array.isArray(row.members)?row.members:[];
   assignments=row.assignments && typeof row.assignments==='object' && !Array.isArray(row.assignments) ? row.assignments : {};
+  remoteUpdatedAt=row.updated_at||remoteUpdatedAt;
   cacheLocal();
   renderMembers();
   renderClassList();
   renderRaid();
 }
-
-async function loadSharedState(){
-  if(!supabaseClient){
-    console.warn('Supabase is not configured. Using browser-local storage only.');
-    return;
+async function loadSharedState(silent=false){
+  if(!sessionToken) return;
+  try{
+    const data=await rpc('gm_get_state',{p_session_token:sessionToken,p_guild_id:GUILD_ID});
+    if(data) applyRemoteState(data);
+  }catch(err){
+    console.error('Shared state load failed:',err);
+    if(String(err.message||'').toLowerCase().includes('session')){
+      await logout(false);
+      authMessage('Your session expired. Please sign in again.',true);
+    }else if(!silent) toast('Could not load shared guild data.');
   }
-
-  const {data,error}=await supabaseClient.from('guild_state').select('id,members,assignments,updated_at').eq('id',GUILD_ID).maybeSingle();
-  if(error){
-    console.error('Supabase load failed:',error);
-    toast('Could not load shared guild data. Using local cache.');
-    return;
-  }
-
-  if(data){
-    applyRemoteState(data);
-  }else{
-    await pushStateToSupabase();
-  }
-  remoteReady=true;
 }
-
-function startRealtimeSync(){
-  if(!supabaseClient || realtimeChannel) return;
-  realtimeChannel=supabaseClient
-    .channel(`guild-state-${GUILD_ID}`)
-    .on('postgres_changes',{
-      event:'*',
-      schema:'public',
-      table:'guild_state',
-      filter:`id=eq.${GUILD_ID}`
-    },payload=>{
-      if(payload.new) applyRemoteState(payload.new);
-    })
-    .subscribe(status=>{
-      if(status==='SUBSCRIBED') console.log('Supabase realtime connected.');
+async function pollSharedState(){
+  if(!sessionToken || document.hidden) return;
+  try{
+    const data=await rpc('gm_get_state',{p_session_token:sessionToken,p_guild_id:GUILD_ID});
+    if(data?.updated_at && data.updated_at!==remoteUpdatedAt) applyRemoteState(data);
+  }catch(err){
+    console.warn('Background sync failed:',err);
+  }
+}
+function startSharedPolling(){
+  clearInterval(pollTimer);
+  pollTimer=setInterval(pollSharedState,5000);
+}
+async function saveState(actionType='State Updated',target='',details={},makeSnapshot=false){
+  cacheLocal();
+  try{
+    const result=await rpc('gm_save_state',{
+      p_session_token:sessionToken,
+      p_guild_id:GUILD_ID,
+      p_members:members,
+      p_assignments:assignments,
+      p_action_type:actionType,
+      p_target:target||'',
+      p_details:details||{},
+      p_make_snapshot:!!makeSnapshot
     });
+    remoteUpdatedAt=result?.updated_at||new Date().toISOString();
+    return true;
+  }catch(err){
+    console.error('Supabase save failed:',err);
+    toast('Save failed. Your change remains only in this browser.');
+    return false;
+  }
 }
-
+async function hasAccounts(){
+  return !!(await rpc('gm_has_accounts',{p_guild_id:GUILD_ID}));
+}
+async function bootstrapDeveloper(username,password){
+  return await rpc('gm_bootstrap_developer',{p_guild_id:GUILD_ID,p_username:username,p_password:password});
+}
+async function login(username,password){
+  const data=await rpc('gm_login',{p_guild_id:GUILD_ID,p_username:username,p_password:password});
+  if(!data?.session_token) throw new Error('Login failed.');
+  sessionToken=data.session_token;
+  currentUser={username:data.username,role:data.role,accountId:data.account_id};
+  localStorage.setItem('gm_session_token',sessionToken);
+  showApp();
+  await loadSharedState();
+  startSharedPolling();
+}
+async function restoreSession(){
+  if(!sessionToken) return false;
+  try{
+    const data=await rpc('gm_session_info',{p_session_token:sessionToken,p_guild_id:GUILD_ID});
+    if(!data?.username) throw new Error('Invalid session');
+    currentUser={username:data.username,role:data.role,accountId:data.account_id};
+    showApp();
+    await loadSharedState();
+    startSharedPolling();
+    return true;
+  }catch(err){
+    clearLocalSession();
+    return false;
+  }
+}
+async function logout(callServer=true){
+  const token=sessionToken;
+  clearInterval(pollTimer);
+  if(callServer && token){
+    try{ await rpc('gm_logout',{p_session_token:token}); }catch(_){ }
+  }
+  clearLocalSession();
+  showAuth();
+  $('#loginPassword').value='';
+}
 function jobInfo(name){
   const j = JOBS.find(x=>x[0]===name);
   return j ? {name:j[0],icon:j[1]} : {name,icon:'swordsman'};
@@ -265,7 +332,7 @@ function initJobSelect(){
   $('#jobSelect').innerHTML=JOBS.map(([name])=>`<option value="${name}">${name}</option>`).join('');
 }
 
-function handleMemberSubmit(e){
+async function handleMemberSubmit(e){
   e.preventDefault();
   const ign=$('#ignInput').value.trim();
   const job=$('#jobSelect').value;
@@ -275,38 +342,31 @@ function handleMemberSubmit(e){
   if(!ign) return;
   const dupe=members.find(m=>m.ign.toLowerCase()===ign.toLowerCase() && m.id!==editingId);
   if(dupe){ toast('That IGN already exists.'); return; }
+  let action, target, details, snapshot=false;
   if(editingId){
     const m=members.find(x=>x.id===editingId);
-    m.ign=ign;
-    m.job=job;
-    m.level=level;
-    m.position=position;
-    m.gearScore=gearScore;
-    toast('Member updated.');
+    const before={ign:m.ign,job:m.job,level:m.level||'',position:m.position||'',gearScore:m.gearScore||''};
+    m.ign=ign; m.job=job; m.level=level; m.position=position; m.gearScore=gearScore;
+    action='Member Updated'; target=ign; details={before,after:{ign,job,level,position,gearScore}};
   } else {
     members.push({id:crypto.randomUUID(),ign,job,level,position,gearScore});
-    toast('Member added.');
+    action='Member Added'; target=ign; details={job,level,position,gearScore};
   }
-  save();
-  renderMembers();
-  renderClassList();
-  renderRaid();
-  closeModal();
+  renderMembers(); renderClassList(); renderRaid(); closeModal();
+  if(await saveState(action,target,details,snapshot)) toast(action==='Member Added'?'Member added.':'Member updated.');
 }
 
-function removeMember(id){
+async function removeMember(id){
   const m=members.find(x=>x.id===id);
   if(!m) return;
   if(!confirm(`Remove ${m.ign} from the guild roster?`)) return;
   members=members.filter(x=>x.id!==id);
+  let clearedSlots=0;
   Object.values(assignments).forEach(raid=>Object.keys(raid||{}).forEach(slot=>{
-    if(raid[slot]===id) raid[slot]='';
+    if(raid[slot]===id){ raid[slot]=''; clearedSlots++; }
   }));
-  save();
-  renderMembers();
-  renderClassList();
-  renderRaid();
-  toast('Member removed.');
+  renderMembers(); renderClassList(); renderRaid();
+  if(await saveState('Member Removed',m.ign,{job:m.job,clearedRaidSlots:clearedSlots},true)) toast('Member removed.');
 }
 
 function ensureRaidStore(key){ if(!assignments[key]) assignments[key]={}; }
@@ -432,7 +492,7 @@ function renderPickerResults(){
   $('#pickerAvailableCount').textContent=`${available.length} available`;
 }
 
-function assignMemberToSlot(slotKey,newId){
+async function assignMemberToSlot(slotKey,newId){
   ensureRaidStore(currentRaid);
   const oldId=assignments[currentRaid][slotKey]||'';
   if(newId){
@@ -444,13 +504,12 @@ function assignMemberToSlot(slotKey,newId){
     }
   }
   assignments[currentRaid][slotKey]=newId;
-  save();
-  closeMemberPicker();
-  renderRaid();
-  if(newId && newId!==oldId){
-    const m=members.find(x=>x.id===newId);
-    toast(`${m?.ign||'Member'} assigned.`);
-  }
+  const oldMember=members.find(x=>x.id===oldId);
+  const newMember=members.find(x=>x.id===newId);
+  closeMemberPicker(); renderRaid();
+  await saveState('Raid Party Updated',RAIDS[currentRaid].title,{slot:slotKey,from:oldMember?.ign||'Empty',to:newMember?.ign||'Empty'});
+  if(newId && newId!==oldId) toast(`${newMember?.ign||'Member'} assigned.`);
+  else if(!newId && oldId) toast('Raid slot cleared.');
   return true;
 }
 
@@ -482,86 +541,6 @@ function downloadTextFile(filename,text,mime='text/plain;charset=utf-8'){
   a.remove();
   setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
-
-function exportBackup(){
-  const data={
-    app:'Guild Manager',
-    formatVersion:1,
-    exportedAt:new Date().toISOString(),
-    members,
-    assignments
-  };
-  downloadTextFile(`Guild-Manager-Backup-${dateStamp()}.json`,JSON.stringify(data,null,2),'application/json;charset=utf-8');
-  toast('JSON backup downloaded.');
-}
-
-function normalizeImportedBackup(raw){
-  if(!raw || typeof raw!=='object') throw new Error('Invalid backup file.');
-  const incomingMembers=Array.isArray(raw.members)?raw.members:null;
-  const incomingAssignments=raw.assignments && typeof raw.assignments==='object' && !Array.isArray(raw.assignments)?raw.assignments:null;
-  if(!incomingMembers || !incomingAssignments) throw new Error('This JSON does not contain guild members and raid assignments.');
-
-  const allowedJobs=new Set(JOBS.map(([name])=>name));
-  const seenIgn=new Set();
-  const cleanMembers=[];
-  for(const item of incomingMembers){
-    if(!item || typeof item!=='object') continue;
-    const ign=String(item.ign||'').trim();
-    const job=String(item.job||'').trim();
-    if(!ign || !allowedJobs.has(job)) continue;
-    const key=ign.toLowerCase();
-    if(seenIgn.has(key)) throw new Error(`Duplicate IGN found in backup: ${ign}`);
-    seenIgn.add(key);
-    cleanMembers.push({
-      ...item,
-      id:String(item.id||crypto.randomUUID()),
-      ign,
-      job,
-      level:String(item.level??''),
-      position:String(item.position??''),
-      gearScore:String(item.gearScore??'')
-    });
-  }
-
-  const validIds=new Set(cleanMembers.map(m=>m.id));
-  const cleanAssignments={};
-  Object.keys(RAIDS).forEach(raidKey=>{
-    cleanAssignments[raidKey]={};
-    const src=incomingAssignments[raidKey];
-    if(!src || typeof src!=='object' || Array.isArray(src)) return;
-    const used=new Set();
-    for(const [slot,idValue] of Object.entries(src)){
-      const id=String(idValue||'');
-      if(!id || !validIds.has(id) || used.has(id)) continue;
-      cleanAssignments[raidKey][String(slot)]=id;
-      used.add(id);
-    }
-  });
-
-  return {members:cleanMembers,assignments:cleanAssignments};
-}
-
-async function importBackupFile(file){
-  try{
-    const text=await file.text();
-    const parsed=JSON.parse(text);
-    const clean=normalizeImportedBackup(parsed);
-    if(!confirm(`Import ${clean.members.length} members and replace the current shared guild data?`)) return;
-    members=clean.members;
-    assignments=clean.assignments;
-    save();
-    renderMembers();
-    renderClassList();
-    renderRaid();
-    toast('JSON backup imported.');
-  } catch(err){
-    console.error(err);
-    alert(`Could not import backup.\n\n${err.message||'Invalid JSON file.'}`);
-  } finally {
-    $('#backupFileInput').value='';
-  }
-}
-
 
 function parseCsvText(text){
   const rows=[];
@@ -755,14 +734,22 @@ async function confirmRosterSync(){
   const sync=pendingRosterSync;
   const removedIds=new Set(sync.removals.map(m=>m.id));
   members=sync.nextMembers;
+  let clearedRaidSlots=0;
   Object.values(assignments).forEach(raid=>Object.keys(raid||{}).forEach(slot=>{
-    if(removedIds.has(raid[slot])) raid[slot]='';
+    if(removedIds.has(raid[slot])){ raid[slot]=''; clearedRaidSlots++; }
   }));
-  cacheLocal();
-  renderMembers(); renderClassList(); renderRaid();
-  closeRosterSyncPreview();
-  if(supabaseClient) await pushStateToSupabase();
-  toast(`Game roster synced: ${members.length} members.`);
+  cacheLocal(); renderMembers(); renderClassList(); renderRaid(); closeRosterSyncPreview();
+  const details={
+    csvMembers:sync.csvCount,
+    finalMembers:members.length,
+    matched:sync.csvCount-sync.additions.length,
+    added:sync.additions.map(x=>x.ign),
+    removed:sync.removals.map(x=>x.ign),
+    nameCorrections:sync.corrections.map(x=>`${x.from} → ${x.to}`),
+    gameDataUpdates:sync.dataUpdates.length,
+    clearedRaidSlots
+  };
+  if(await saveState('Game CSV Sync','Guild Roster',details,true)) toast(`Game roster synced: ${members.length} members.`);
 }
 async function importGameCsvFile(file){
   try{
@@ -859,12 +846,6 @@ $('#memberTable thead').addEventListener('click',e=>{
   renderMembers();
 });
 
-$('#exportBackupBtn').addEventListener('click',exportBackup);
-$('#importBackupBtn').addEventListener('click',()=>$('#backupFileInput').click());
-$('#backupFileInput').addEventListener('change',e=>{
-  const file=e.target.files?.[0];
-  if(file) importBackupFile(file);
-});
 $('#copyDiscordBtn').addEventListener('click',copyRaidForDiscord);
 $('#downloadRaidTxtBtn').addEventListener('click',downloadRaidTxt);
 
@@ -876,6 +857,8 @@ $$('.nav-item').forEach(btn=>btn.addEventListener('click',()=>{
   $(`#${btn.dataset.view}View`).classList.add('active');
   if(btn.dataset.view==='classes') renderClassList();
   if(btn.dataset.view==='raids') renderRaid();
+  if(btn.dataset.view==='logs') loadLogs();
+  if(btn.dataset.view==='accounts'){ loadAccounts(); loadSnapshots(); }
 }));
 
 $$('.raid-option').forEach(btn=>btn.addEventListener('click',()=>{
@@ -942,13 +925,128 @@ window.addEventListener('scroll',()=>{
   if(activePickerSlot) positionMemberPicker();
 },true);
 
+function formatLogDetails(details){
+  if(!details || typeof details!=='object') return '—';
+  if(details.before && details.after){
+    const changed=[];
+    for(const k of Object.keys(details.after)) if(String(details.before?.[k]??'')!==String(details.after?.[k]??'')) changed.push(`${k}: ${details.before?.[k]??'—'} → ${details.after[k]??'—'}`);
+    return changed.join(' · ')||'No field changes';
+  }
+  if(Array.isArray(details.added)||Array.isArray(details.removed)){
+    const bits=[];
+    bits.push(`${details.csvMembers??'?'} CSV members`);
+    if(details.added?.length) bits.push(`Added: ${details.added.join(', ')}`);
+    if(details.removed?.length) bits.push(`Removed: ${details.removed.join(', ')}`);
+    if(details.nameCorrections?.length) bits.push(`Corrected: ${details.nameCorrections.join(', ')}`);
+    return bits.join(' · ');
+  }
+  return Object.entries(details).map(([k,v])=>`${k}: ${Array.isArray(v)?v.join(', '):(v&&typeof v==='object'?JSON.stringify(v):v)}`).join(' · ')||'—';
+}
+async function loadLogs(){
+  try{
+    auditLogs=await rpc('gm_list_logs',{p_session_token:sessionToken,p_guild_id:GUILD_ID,p_limit:500})||[];
+    const actions=[...new Set(auditLogs.map(x=>x.action_type).filter(Boolean))].sort();
+    const sel=$('#logActionFilter'), current=sel.value;
+    sel.innerHTML='<option value="">All actions</option>'+actions.map(x=>`<option value="${attr(x)}">${esc(x)}</option>`).join('');
+    if(actions.includes(current)) sel.value=current;
+    renderLogs();
+  }catch(err){ console.error(err); toast('Could not load logs.'); }
+}
+function renderLogs(){
+  const q=$('#logSearch').value.trim().toLowerCase();
+  const a=$('#logActionFilter').value;
+  const rows=auditLogs.filter(x=>(!a||x.action_type===a) && `${x.username} ${x.role} ${x.action_type} ${x.target} ${formatLogDetails(x.details)}`.toLowerCase().includes(q));
+  $('#logsEmpty').style.display=rows.length?'none':'block';
+  $('#logsTableBody').innerHTML=rows.map(x=>`<tr><td>${esc(new Date(x.created_at).toLocaleString())}</td><td><strong>${esc(x.username)}</strong></td><td><span class="role-badge ${x.role}">${esc(x.role)}</span></td><td>${esc(x.action_type)}</td><td>${esc(x.target||'—')}</td><td class="log-details">${esc(formatLogDetails(x.details))}</td></tr>`).join('');
+}
+async function loadAccounts(){
+  if(currentUser?.role!=='developer') return;
+  try{ accounts=await rpc('gm_list_accounts',{p_session_token:sessionToken,p_guild_id:GUILD_ID})||[]; renderAccounts(); }
+  catch(err){ console.error(err); toast('Could not load accounts.'); }
+}
+function renderAccounts(){
+  $('#accountsEmpty').style.display=accounts.length?'none':'block';
+  $('#accountsTableBody').innerHTML=accounts.map(a=>`<tr><td><strong>${esc(a.username)}</strong></td><td><span class="role-badge ${a.role}">${esc(a.role)}</span></td><td><span class="status-badge ${a.active?'active':'disabled'}">${a.active?'Active':'Disabled'}</span></td><td>${a.last_login_at?esc(new Date(a.last_login_at).toLocaleString()):'Never'}</td><td class="actions">${a.role==='officer'?`<button class="action-btn" data-reset-account="${attr(a.id)}" data-account-name="${attr(a.username)}">Reset Password</button><button class="action-btn ${a.active?'danger':''}" data-toggle-account="${attr(a.id)}" data-account-active="${a.active?'1':'0'}">${a.active?'Disable':'Enable'}</button>`:'<span class="muted-small">Protected</span>'}</td></tr>`).join('');
+}
+async function loadSnapshots(){
+  if(currentUser?.role!=='developer') return;
+  try{ snapshots=await rpc('gm_list_snapshots',{p_session_token:sessionToken,p_guild_id:GUILD_ID,p_limit:100})||[]; renderSnapshots(); }
+  catch(err){ console.error(err); toast('Could not load snapshots.'); }
+}
+function renderSnapshots(){
+  $('#snapshotsEmpty').style.display=snapshots.length?'none':'block';
+  $('#snapshotsTableBody').innerHTML=snapshots.map(s=>`<tr><td>${esc(new Date(s.created_at).toLocaleString())}</td><td>${esc(s.reason)}</td><td>${esc(s.username||'System')}</td><td>${Number(s.member_count||0).toLocaleString()}</td><td class="actions"><button class="action-btn" data-restore-snapshot="${attr(s.id)}">Restore</button></td></tr>`).join('');
+}
+async function restoreSnapshot(id){
+  const snap=snapshots.find(x=>x.id===id);
+  if(!snap) return;
+  if(!confirm(`Restore the snapshot from ${new Date(snap.created_at).toLocaleString()}?\n\nThe current state will be saved as another safety snapshot first.`)) return;
+  try{
+    const data=await rpc('gm_restore_snapshot',{p_session_token:sessionToken,p_guild_id:GUILD_ID,p_snapshot_id:id});
+    if(data?.members) applyRemoteState(data);
+    toast('Safety snapshot restored.');
+    await loadSnapshots(); await loadLogs();
+  }catch(err){ alert(err.message||'Could not restore snapshot.'); }
+}
+async function createOfficer(e){
+  e.preventDefault();
+  const username=$('#newOfficerUsername').value.trim(), password=$('#newOfficerPassword').value;
+  try{
+    await rpc('gm_create_officer',{p_session_token:sessionToken,p_guild_id:GUILD_ID,p_username:username,p_password:password});
+    e.target.reset(); toast(`Officer ${username} created.`); await loadAccounts(); await loadLogs();
+  }catch(err){ alert(err.message||'Could not create officer.'); }
+}
+async function toggleAccount(id,active){
+  const next=!active;
+  if(!confirm(`${next?'Enable':'Disable'} this Officer account?`)) return;
+  try{ await rpc('gm_set_account_active',{p_session_token:sessionToken,p_guild_id:GUILD_ID,p_account_id:id,p_active:next}); toast(`Officer ${next?'enabled':'disabled'}.`); await loadAccounts(); await loadLogs(); }
+  catch(err){ alert(err.message||'Could not update account.'); }
+}
+async function resetAccountPassword(id,name){
+  const password=prompt(`Enter a new temporary password for ${name}.\nMinimum 8 characters:`);
+  if(password===null) return;
+  if(password.length<8){ alert('Password must be at least 8 characters.'); return; }
+  try{ await rpc('gm_reset_account_password',{p_session_token:sessionToken,p_guild_id:GUILD_ID,p_account_id:id,p_new_password:password}); toast(`Password reset for ${name}.`); await loadLogs(); }
+  catch(err){ alert(err.message||'Could not reset password.'); }
+}
+
+$('#loginForm').addEventListener('submit',async e=>{
+  e.preventDefault(); authMessage('Signing in...');
+  try{ await login($('#loginUsername').value.trim(),$('#loginPassword').value); authMessage(''); }
+  catch(err){ authMessage(err.message||'Invalid username or password.',true); }
+});
+$('#bootstrapForm').addEventListener('submit',async e=>{
+  e.preventDefault();
+  const u=$('#bootstrapUsername').value.trim(), p1=$('#bootstrapPassword').value, p2=$('#bootstrapPassword2').value;
+  if(p1!==p2){ authMessage('Passwords do not match.',true); return; }
+  authMessage('Creating Developer account...');
+  try{ await bootstrapDeveloper(u,p1); await login(u,p1); authMessage(''); }
+  catch(err){ authMessage(err.message||'Could not create Developer account.',true); }
+});
+$('#logoutBtn').addEventListener('click',()=>logout(true));
+$('#refreshLogsBtn').addEventListener('click',loadLogs);
+$('#logSearch').addEventListener('input',renderLogs);
+$('#logActionFilter').addEventListener('change',renderLogs);
+$('#createOfficerForm').addEventListener('submit',createOfficer);
+$('#refreshAccountsBtn').addEventListener('click',loadAccounts);
+$('#refreshSnapshotsBtn').addEventListener('click',loadSnapshots);
+$('#snapshotsTableBody').addEventListener('click',e=>{ const b=e.target.closest('[data-restore-snapshot]'); if(b) restoreSnapshot(b.dataset.restoreSnapshot); });
+$('#accountsTableBody').addEventListener('click',e=>{
+  const t=e.target.closest('[data-toggle-account]');
+  if(t) toggleAccount(t.dataset.toggleAccount,t.dataset.accountActive==='1');
+  const r=e.target.closest('[data-reset-account]');
+  if(r) resetAccountPassword(r.dataset.resetAccount,r.dataset.accountName);
+});
+
 async function initApp(){
-  initJobSelect();
-  renderMembers();
-  renderClassList();
-  renderRaid();
-  await loadSharedState();
-  startRealtimeSync();
+  initJobSelect(); renderMembers(); renderClassList(); renderRaid(); showAuth();
+  if(!supabaseClient){ authMessage('Supabase is not configured. Update config.js first.',true); return; }
+  try{
+    if(await restoreSession()) return;
+    const exists=await hasAccounts();
+    $('#loginMode').classList.toggle('hidden',!exists);
+    $('#bootstrapMode').classList.toggle('hidden',exists);
+  }catch(err){ authMessage(`Supabase setup is incomplete: ${err.message||err}`,true); }
 }
 
 initApp();

@@ -7,7 +7,31 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="app-shell">
+  <div id="authScreen" class="auth-screen">
+    <div class="auth-card">
+      <div class="auth-brand"><div class="brand-mark">GM</div><div><h1>Guild Manager</h1><p>ROTW secure access</p></div></div>
+      <div id="loginMode">
+        <p class="eyebrow">Secure Access</p><h2>Sign In</h2><p class="auth-copy">Use the username and password created by the Developer.</p>
+        <form id="loginForm" class="auth-form">
+          <label>Username<input id="loginUsername" autocomplete="username" required maxlength="40" /></label>
+          <label>Password<input id="loginPassword" type="password" autocomplete="current-password" required maxlength="100" /></label>
+          <button class="primary-btn auth-submit" type="submit">Sign In</button>
+        </form>
+      </div>
+      <div id="bootstrapMode" class="hidden">
+        <p class="eyebrow">First Setup</p><h2>Create Developer Account</h2><p class="auth-copy">No account exists yet. Create the first Developer account. This setup can only run once.</p>
+        <form id="bootstrapForm" class="auth-form">
+          <label>Developer Username<input id="bootstrapUsername" autocomplete="username" required maxlength="40" /></label>
+          <label>Password<input id="bootstrapPassword" type="password" autocomplete="new-password" required minlength="8" maxlength="100" /></label>
+          <label>Confirm Password<input id="bootstrapPassword2" type="password" autocomplete="new-password" required minlength="8" maxlength="100" /></label>
+          <button class="primary-btn auth-submit" type="submit">Create Developer Account</button>
+        </form>
+      </div>
+      <div id="authStatus" class="auth-status"></div>
+    </div>
+  </div>
+
+  <div id="appShell" class="app-shell hidden">
     <aside class="sidebar">
       <div class="brand">
         <div class="brand-mark">GM</div>
@@ -17,23 +41,26 @@
         <button class="nav-item active" data-view="members">👥 <span>Members</span></button>
         <button class="nav-item" data-view="classes">📚 <span>Class List</span></button>
         <button class="nav-item" data-view="raids">🛡️ <span>Raid Party</span></button>
+        <button class="nav-item" data-view="logs">🧾 <span>Logs</span></button>
+        <button id="accountsNav" class="nav-item hidden" data-view="accounts">🔐 <span>Accounts</span></button>
       </nav>
+      <div class="sidebar-user">
+        <div><strong id="currentUsername">—</strong><span id="currentRole">—</span></div>
+        <button id="logoutBtn" class="secondary-btn compact-btn" type="button">Logout</button>
+      </div>
       <div class="sidebar-footer">
-        <strong>Supabase sync enabled</strong>
-        <span>Shared guild data + local cache</span>
+        <strong>Secure Supabase sync</strong>
+        <span>Username login + audit history</span>
       </div>
     </aside>
 
     <main class="main">
       <section id="membersView" class="view active">
         <header class="page-header">
-          <div><p class="eyebrow">Guild Roster</p><h2>Members</h2><p>Add, edit, and remove guild members.</p></div>
+          <div><p class="eyebrow">Guild Roster</p><h2>Members</h2><p>Add, edit, and synchronize guild members.</p></div>
           <div class="header-actions">
             <button id="importGameCsvBtn" class="primary-btn" type="button">↻ Sync Game CSV</button>
-            <button id="importBackupBtn" class="secondary-btn" type="button">Import JSON</button>
-            <button id="exportBackupBtn" class="secondary-btn" type="button">Export JSON</button>
             <button id="addMemberBtn" class="primary-btn">+ Add Member</button>
-            <input id="backupFileInput" type="file" accept="application/json,.json" hidden />
             <input id="gameCsvInput" type="file" accept="text/csv,.csv" hidden />
           </div>
         </header>
@@ -59,13 +86,11 @@
         </div>
       </section>
 
-
       <section id="classesView" class="view">
         <header class="page-header">
           <div><p class="eyebrow">Guild Composition</p><h2>Class List</h2><p>See how many members you have in each job. Click a class to view its members.</p></div>
           <div id="classMemberTotal" class="count-pill">0 members</div>
         </header>
-
         <div class="class-layout">
           <div>
             <div class="class-summary card">
@@ -75,22 +100,14 @@
             </div>
             <div id="classGrid" class="class-grid"></div>
           </div>
-
           <aside id="classMembersPanel" class="class-members-panel card">
-            <div class="class-panel-empty">
-              <span class="class-panel-symbol">📚</span>
-              <strong>Select a class</strong>
-              <p>Click any class on the left to see all members using that job.</p>
-            </div>
+            <div class="class-panel-empty"><span class="class-panel-symbol">📚</span><strong>Select a class</strong><p>Click any class on the left to see all members using that job.</p></div>
           </aside>
         </div>
       </section>
 
       <section id="raidsView" class="view">
-        <header class="page-header">
-          <div><p class="eyebrow">Party Builder</p><h2>Raid Party</h2><p>Assign guild members to raid teams. Duplicate members are blocked within the selected raid.</p></div>
-        </header>
-
+        <header class="page-header"><div><p class="eyebrow">Party Builder</p><h2>Raid Party</h2><p>Assign guild members to raid teams. Duplicate members are blocked within the selected raid.</p></div></header>
         <div class="raid-layout">
           <div class="raid-menu card">
             <h3>Raid Brackets</h3>
@@ -98,7 +115,6 @@
             <button class="raid-option" data-raid="polarityZone"><span>Polarity Zone</span><small>34 teams</small></button>
             <button class="raid-option" data-raid="guildSiege"><span>Guild Siege</span><small>32 teams</small></button>
           </div>
-
           <div class="raid-content">
             <div class="raid-titlebar card">
               <div><p class="eyebrow">Selected Raid</p><h3 id="raidTitle">Guild League</h3></div>
@@ -109,6 +125,43 @@
               </div>
             </div>
             <div id="partyGroups"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="logsView" class="view">
+        <header class="page-header">
+          <div><p class="eyebrow">Audit Trail</p><h2>Logs</h2><p>Read-only history of roster, raid-party, CSV sync, and account changes.</p></div>
+          <button id="refreshLogsBtn" class="secondary-btn" type="button">↻ Refresh</button>
+        </header>
+        <div class="toolbar logs-toolbar">
+          <input id="logSearch" type="search" placeholder="Search user, action, member..." />
+          <select id="logActionFilter"><option value="">All actions</option></select>
+        </div>
+        <div class="card table-card">
+          <table id="logsTable"><thead><tr><th>Date / Time</th><th>User</th><th>Role</th><th>Action</th><th>Target</th><th>Details</th></tr></thead><tbody id="logsTableBody"></tbody></table>
+          <div id="logsEmpty" class="empty-state">No log entries yet.</div>
+        </div>
+      </section>
+
+      <section id="accountsView" class="view">
+        <header class="page-header"><div><p class="eyebrow">Developer Only</p><h2>Account Management</h2><p>Create and manage Officer credentials. There is no public registration.</p></div></header>
+        <div class="account-layout">
+          <form id="createOfficerForm" class="card account-create-card">
+            <h3>Create Officer Account</h3>
+            <label>Username<input id="newOfficerUsername" required maxlength="40" autocomplete="off" /></label>
+            <label>Temporary Password<input id="newOfficerPassword" type="password" required minlength="8" maxlength="100" autocomplete="new-password" /></label>
+            <button class="primary-btn" type="submit">Create Officer</button>
+          </form>
+          <div class="card table-card account-list-card">
+            <div class="table-card-title"><h3>Accounts</h3><button id="refreshAccountsBtn" class="secondary-btn compact-btn" type="button">↻ Refresh</button></div>
+            <table><thead><tr><th>Username</th><th>Role</th><th>Status</th><th>Last Login</th><th>Actions</th></tr></thead><tbody id="accountsTableBody"></tbody></table>
+            <div id="accountsEmpty" class="empty-state">No accounts found.</div>
+          </div>
+          <div class="card table-card snapshot-card">
+            <div class="table-card-title"><div><h3>Safety Snapshots</h3><p>Automatic restore points created before roster removals and CSV syncs.</p></div><button id="refreshSnapshotsBtn" class="secondary-btn compact-btn" type="button">↻ Refresh</button></div>
+            <table><thead><tr><th>Date / Time</th><th>Reason</th><th>Created By</th><th>Members</th><th>Action</th></tr></thead><tbody id="snapshotsTableBody"></tbody></table>
+            <div id="snapshotsEmpty" class="empty-state">No safety snapshots yet.</div>
           </div>
         </div>
       </section>
@@ -132,39 +185,20 @@
     </div>
   </div>
 
-
-
   <div id="csvSyncModal" class="modal hidden" aria-hidden="true">
     <div class="modal-backdrop" data-close-csv-sync></div>
     <div class="modal-panel sync-panel">
-      <div class="modal-header">
-        <div><p class="eyebrow">Game Export</p><h3>Review Roster Sync</h3><p class="sync-subtitle">The game CSV is the master roster. Review changes before updating Supabase.</p></div>
-        <button class="icon-btn" type="button" data-close-csv-sync>×</button>
-      </div>
-      <div class="sync-stats">
-        <div><strong id="syncCsvCount">0</strong><span>CSV members</span></div>
-        <div><strong id="syncMatchedCount">0</strong><span>Matched</span></div>
-        <div><strong id="syncAddedCount">0</strong><span>To add</span></div>
-        <div><strong id="syncRemovedCount">0</strong><span>To remove</span></div>
-      </div>
+      <div class="modal-header"><div><p class="eyebrow">Game Export</p><h3>Review Roster Sync</h3><p class="sync-subtitle">The game CSV is the master roster. Review changes before updating Supabase.</p></div><button class="icon-btn" type="button" data-close-csv-sync>×</button></div>
+      <div class="sync-stats"><div><strong id="syncCsvCount">0</strong><span>CSV members</span></div><div><strong id="syncMatchedCount">0</strong><span>Matched</span></div><div><strong id="syncAddedCount">0</strong><span>To add</span></div><div><strong id="syncRemovedCount">0</strong><span>To remove</span></div></div>
       <div class="sync-note">IGN spelling, symbols, spaces, capitalization and Japanese characters will follow the CSV exactly. A blank in-game IGN is stored as <strong>_</strong> on the website. Removed members are also cleared from raid-party slots.</div>
       <div id="syncChanges" class="sync-changes"></div>
-      <div class="modal-actions">
-        <button type="button" class="secondary-btn" data-close-csv-sync>Cancel</button>
-        <button id="confirmCsvSyncBtn" type="button" class="primary-btn">Confirm & Sync to Supabase</button>
-      </div>
+      <div class="modal-actions"><button type="button" class="secondary-btn" data-close-csv-sync>Cancel</button><button id="confirmCsvSyncBtn" type="button" class="primary-btn">Confirm & Sync to Supabase</button></div>
     </div>
   </div>
 
   <div id="memberPicker" class="member-picker hidden" aria-hidden="true">
-    <div class="picker-search-wrap">
-      <div class="picker-search-box">
-        <span class="picker-search-icon">⌕</span>
-        <input id="pickerSearch" type="search" autocomplete="off" placeholder="Type IGN or job to search..." />
-      </div>
-    </div>
-    <div id="pickerAvailableCount" class="picker-meta">0 available</div>
-    <div id="pickerResults" class="picker-results"></div>
+    <div class="picker-search-wrap"><div class="picker-search-box"><span class="picker-search-icon">⌕</span><input id="pickerSearch" type="search" autocomplete="off" placeholder="Type IGN or job to search..." /></div></div>
+    <div id="pickerAvailableCount" class="picker-meta">0 available</div><div id="pickerResults" class="picker-results"></div>
   </div>
 
   <div id="toast" class="toast"></div>
