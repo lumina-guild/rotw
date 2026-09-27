@@ -178,22 +178,24 @@ function startSharedPolling(){
 async function saveState(actionType='State Updated',target='',details={},makeSnapshot=false){
   cacheLocal();
   try{
-    const result=await rpc('gm_save_state',{
+    const result=await rpc('gm_save_state_v2',{
       p_session_token:sessionToken,
       p_guild_id:GUILD_ID,
-      p_members:members,
-      p_assignments:assignments,
-      p_attendance:attendance,
-      p_action_type:actionType,
-      p_target:target||'',
-      p_details:details||{},
-      p_make_snapshot:!!makeSnapshot
+      p_payload:{
+        members,
+        assignments,
+        attendance,
+        action_type:actionType,
+        target:target||'',
+        details:details||{},
+        make_snapshot:!!makeSnapshot
+      }
     });
     remoteUpdatedAt=result?.updated_at||new Date().toISOString();
     return true;
   }catch(err){
     console.error('Supabase save failed:',err);
-    toast('Save failed. Your change remains only in this browser.');
+    toast(`Save failed: ${err?.message||'Supabase rejected the update.'}`);
     return false;
   }
 }
