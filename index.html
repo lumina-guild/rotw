@@ -40,6 +40,7 @@
       <nav class="nav">
         <button class="nav-item active" data-view="members">👥 <span>Members</span></button>
         <button class="nav-item" data-view="classes">📚 <span>Class List</span></button>
+        <button class="nav-item" data-view="overview">🏆 <span>Member Overview</span></button>
         <button class="nav-item" data-view="raids">🛡️ <span>Raid Party</span></button>
         <button class="nav-item" data-view="attendance">📅 <span>Attendance</span></button>
         <button class="nav-item" data-view="logs">🧾 <span>Logs</span></button>
@@ -105,6 +106,20 @@
             <div class="class-panel-empty"><span class="class-panel-symbol">📚</span><strong>Select a class</strong><p>Click any class on the left to see all members using that job.</p></div>
           </aside>
         </div>
+      </section>
+
+
+      <section id="overviewView" class="view">
+        <header class="page-header">
+          <div><p class="eyebrow">Guild Standouts</p><h2>Member Overview</h2><p>Top Gear Score member for every class. Classes without a current member are still shown.</p></div>
+          <div id="overviewMemberTotal" class="count-pill">0 members</div>
+        </header>
+        <div class="overview-summary">
+          <div class="card overview-stat"><span>Classes Represented</span><strong id="overviewRepresented">0</strong></div>
+          <div class="card overview-stat"><span>Total Classes</span><strong id="overviewClassTotal">47</strong></div>
+          <div class="card overview-stat"><span>Highest Gear Score</span><strong id="overviewHighestGear">—</strong></div>
+        </div>
+        <div id="overviewGroups" class="overview-groups"></div>
       </section>
 
       <section id="raidsView" class="view">

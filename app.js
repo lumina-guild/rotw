@@ -33,6 +33,18 @@ const JOBS = [
 
   // Druid family
   ['Druid','druid'],['Kanos','druid'],['Alithea','druid']
+
+];
+
+const JOB_FAMILIES = [
+  ['Swordsman','swordsman',['Swordsman','Knight','Lord Knight','Rune Knight','Crusader','Paladin','Royal Guard']],
+  ['Mage','mage',['Mage','Wizard','High Wizard','Warlock','Sage']],
+  ['Archer','archer',['Archer','Hunter','Sniper','Ranger','Bard','Clown','Minstrel','Dancer','Gypsy','Wanderer']],
+  ['Acolyte','acolyte',['Acolyte','Priest','High Priest','Arch Bishop','Monk','Champion','Sura']],
+  ['Thief','thief',['Thief','Assassin','Assassin Cross','Guillotine Cross','Rogue']],
+  ['Merchant','merchant',['Merchant','Blacksmith','Whitesmith','Mechanic','Alchemist','Creator','Genetic']],
+  ['Gunslinger','gunslinger',['Gunslinger','Rebel','Night Watch']],
+  ['Druid','druid',['Druid','Kanos','Alithea']]
 ];
 
 const RAIDS = {
@@ -96,7 +108,7 @@ function clearLocalSession(){
   sessionStorage.removeItem('gm_assignments');
   sessionStorage.removeItem('gm_attendance');
   members=[]; assignments={}; attendance=[];
-  renderMembers?.(); renderClassList?.(); renderRaid?.(); renderAttendance?.();
+  renderMembers?.(); renderClassList?.(); renderMemberOverview?.(); renderRaid?.(); renderAttendance?.();
 }
 
 function requireSupabase(){
@@ -133,6 +145,7 @@ function applyRemoteState(row){
   cacheLocal();
   renderMembers();
   renderClassList();
+  renderMemberOverview();
   renderRaid();
   renderAttendance();
 }
@@ -273,6 +286,44 @@ function renderMembers(){
   });
 }
 
+function normalizedGearScore(value){
+  const n=Number(String(value??'').replace(/,/g,''));
+  return Number.isFinite(n)?n:0;
+}
+function topMemberForJob(job){
+  const list=members.filter(m=>String(m.job||'').trim().toLowerCase()===String(job||'').trim().toLowerCase());
+  if(!list.length) return null;
+  return [...list].sort((a,b)=>normalizedGearScore(b.gearScore)-normalizedGearScore(a.gearScore)||String(a.ign||'').localeCompare(String(b.ign||''),undefined,{sensitivity:'base'}))[0];
+}
+function renderMemberOverview(){
+  if(!$('#overviewGroups')) return;
+  const officialJobs=JOBS.map(([name])=>name);
+  const officialLower=new Set(officialJobs.map(x=>x.toLowerCase()));
+  const extraJobs=[...new Set(members.map(m=>String(m.job||'').trim()).filter(Boolean).filter(j=>!officialLower.has(j.toLowerCase())))].sort((a,b)=>a.localeCompare(b));
+  const represented=officialJobs.filter(job=>members.some(m=>String(m.job||'').trim().toLowerCase()===job.toLowerCase())).length + extraJobs.length;
+  const highest=members.reduce((max,m)=>Math.max(max,normalizedGearScore(m.gearScore)),0);
+  $('#overviewMemberTotal').textContent=`${members.length} member${members.length===1?'':'s'}`;
+  $('#overviewRepresented').textContent=represented;
+  $('#overviewClassTotal').textContent=officialJobs.length + extraJobs.length;
+  $('#overviewHighestGear').textContent=highest?highest.toLocaleString():'—';
+
+  const groupHtml=JOB_FAMILIES.map(([family,icon,jobs])=>{
+    const cards=jobs.map(job=>overviewClassCard(job,icon)).join('');
+    return `<section class="overview-family card"><div class="overview-family-head"><div><img src="${iconPath(icon)}" alt=""><div><p class="eyebrow">Class Family</p><h3>${esc(family)}</h3></div></div><span>${jobs.filter(j=>topMemberForJob(j)).length}/${jobs.length} represented</span></div><div class="overview-grid">${cards}</div></section>`;
+  });
+  if(extraJobs.length){
+    groupHtml.push(`<section class="overview-family card"><div class="overview-family-head"><div><span class="overview-generic-icon">★</span><div><p class="eyebrow">Additional Classes</p><h3>Other</h3></div></div><span>${extraJobs.length} detected</span></div><div class="overview-grid">${extraJobs.map(job=>overviewClassCard(job,jobInfo(job).icon)).join('')}</div></section>`);
+  }
+  $('#overviewGroups').innerHTML=groupHtml.join('');
+}
+function overviewClassCard(job,icon){
+  const top=topMemberForJob(job);
+  if(!top){
+    return `<article class="overview-class-card empty"><div class="overview-class-title"><img src="${iconPath(icon)}" alt=""><strong>${esc(job)}</strong></div><div class="overview-no-member"><span>—</span><strong>No Member</strong><small>No guild member currently uses this class.</small></div></article>`;
+  }
+  return `<article class="overview-class-card"><div class="overview-class-title"><img src="${iconPath(icon)}" alt=""><strong>${esc(job)}</strong><span class="overview-rank">#1</span></div><div class="overview-winner"><div class="member-avatar">${initials(top.ign)}</div><div><strong>${esc(top.ign)}</strong><small>Top Gear Score</small></div></div><div class="overview-gear"><span>Gear Score</span><strong>${normalizedGearScore(top.gearScore).toLocaleString()}</strong></div></article>`;
+}
+
 function classCount(job){
   return members.filter(m=>m.job===job).length;
 }
@@ -371,7 +422,7 @@ async function handleMemberSubmit(e){
     members.push({id:crypto.randomUUID(),ign,job,level,position,gearScore});
     action='Member Added'; target=ign; details={job,level,position,gearScore};
   }
-  renderMembers(); renderClassList(); renderRaid(); closeModal();
+  renderMembers(); renderClassList(); renderMemberOverview(); renderRaid(); closeModal();
   if(await saveState(action,target,details,snapshot)) toast(action==='Member Added'?'Member added.':'Member updated.');
 }
 
@@ -384,7 +435,7 @@ async function removeMember(id){
   Object.values(assignments).forEach(raid=>Object.keys(raid||{}).forEach(slot=>{
     if(raid[slot]===id){ raid[slot]=''; clearedSlots++; }
   }));
-  renderMembers(); renderClassList(); renderRaid();
+  renderMembers(); renderClassList(); renderMemberOverview(); renderRaid();
   if(await saveState('Member Removed',m.ign,{job:m.job,clearedRaidSlots:clearedSlots},true)) toast('Member removed.');
 }
 
@@ -757,7 +808,7 @@ async function confirmRosterSync(){
   Object.values(assignments).forEach(raid=>Object.keys(raid||{}).forEach(slot=>{
     if(removedIds.has(raid[slot])){ raid[slot]=''; clearedRaidSlots++; }
   }));
-  cacheLocal(); renderMembers(); renderClassList(); renderRaid(); closeRosterSyncPreview();
+  cacheLocal(); renderMembers(); renderClassList(); renderMemberOverview(); renderRaid(); closeRosterSyncPreview();
   const details={
     csvMembers:sync.csvCount,
     finalMembers:members.length,
@@ -875,6 +926,7 @@ $$('.nav-item').forEach(btn=>btn.addEventListener('click',()=>{
   $$('.view').forEach(x=>x.classList.remove('active'));
   $(`#${btn.dataset.view}View`).classList.add('active');
   if(btn.dataset.view==='classes') renderClassList();
+  if(btn.dataset.view==='overview') renderMemberOverview();
   if(btn.dataset.view==='raids') renderRaid();
   if(btn.dataset.view==='attendance') renderAttendance();
   if(btn.dataset.view==='logs') loadLogs();
@@ -1262,7 +1314,7 @@ $('#accountsTableBody').addEventListener('click',e=>{
 });
 
 async function initApp(){
-  initJobSelect(); initAttendanceControls(); renderMembers(); renderClassList(); renderRaid(); renderAttendance(); showAuth();
+  initJobSelect(); initAttendanceControls(); renderMembers(); renderClassList(); renderMemberOverview(); renderRaid(); renderAttendance(); showAuth();
   if(!supabaseClient){ authMessage('Supabase is not configured. Update config.js first.',true); return; }
   try{
     if(await restoreSession()) return;
