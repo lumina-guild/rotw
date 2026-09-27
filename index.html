@@ -29,21 +29,30 @@
         <header class="page-header">
           <div><p class="eyebrow">Guild Roster</p><h2>Members</h2><p>Add, edit, and remove guild members.</p></div>
           <div class="header-actions">
+            <button id="importGameCsvBtn" class="primary-btn" type="button">↻ Sync Game CSV</button>
             <button id="importBackupBtn" class="secondary-btn" type="button">Import JSON</button>
             <button id="exportBackupBtn" class="secondary-btn" type="button">Export JSON</button>
             <button id="addMemberBtn" class="primary-btn">+ Add Member</button>
             <input id="backupFileInput" type="file" accept="application/json,.json" hidden />
+            <input id="gameCsvInput" type="file" accept="text/csv,.csv" hidden />
           </div>
         </header>
 
         <div class="toolbar">
           <input id="memberSearch" type="search" placeholder="Search IGN or job..." />
-          <div id="memberCount" class="count-pill">0 members</div>
+          <div class="toolbar-meta"><span id="lastGameSync">No game CSV synced yet</span><div id="memberCount" class="count-pill">0 members</div></div>
         </div>
 
         <div class="card table-card">
-          <table>
-            <thead><tr><th>Member</th><th>Job</th><th class="actions-col">Actions</th></tr></thead>
+          <table id="memberTable">
+            <thead><tr>
+              <th><button class="sort-head" data-sort-key="ign">Member</button></th>
+              <th><button class="sort-head" data-sort-key="level">Lv.</button></th>
+              <th><button class="sort-head" data-sort-key="job">Job</button></th>
+              <th><button class="sort-head" data-sort-key="position">Guild Position</button></th>
+              <th><button class="sort-head" data-sort-key="gearScore">Gear Score</button></th>
+              <th class="actions-col">Actions</th>
+            </tr></thead>
             <tbody id="memberTableBody"></tbody>
           </table>
           <div id="memberEmpty" class="empty-state">No members yet. Add your first guild member.</div>
@@ -61,7 +70,7 @@
           <div>
             <div class="class-summary card">
               <div><strong id="classFilledCount">0</strong><span>Classes represented</span></div>
-              <div><strong id="classTotalCount">17</strong><span>Total classes</span></div>
+              <div><strong id="classTotalCount">47</strong><span>Total classes</span></div>
               <div><strong id="classRosterCount">0</strong><span>Guild members</span></div>
             </div>
             <div id="classGrid" class="class-grid"></div>
@@ -88,7 +97,6 @@
             <button class="raid-option active" data-raid="guildLeague"><span>Guild League</span><small>40 teams</small></button>
             <button class="raid-option" data-raid="polarityZone"><span>Polarity Zone</span><small>34 teams</small></button>
             <button class="raid-option" data-raid="guildSiege"><span>Guild Siege</span><small>32 teams</small></button>
-            <button class="raid-option" data-raid="mirrorWorld"><span>Mirror World</span><small>34 teams</small></button>
           </div>
 
           <div class="raid-content">
@@ -114,11 +122,39 @@
       <form id="memberForm">
         <label>IGN<input id="ignInput" maxlength="40" required placeholder="Enter in-game name" /></label>
         <label>Job<select id="jobSelect" required></select></label>
+        <div class="form-grid-3">
+          <label>Level<input id="levelInput" inputmode="numeric" placeholder="e.g. 87" /></label>
+          <label>Guild Position<input id="positionInput" maxlength="40" placeholder="e.g. Member" /></label>
+          <label>Gear Score<input id="gearScoreInput" inputmode="numeric" placeholder="e.g. 50000" /></label>
+        </div>
         <div class="modal-actions"><button type="button" class="secondary-btn" data-close-modal>Cancel</button><button type="submit" class="primary-btn">Save Member</button></div>
       </form>
     </div>
   </div>
 
+
+
+  <div id="csvSyncModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-backdrop" data-close-csv-sync></div>
+    <div class="modal-panel sync-panel">
+      <div class="modal-header">
+        <div><p class="eyebrow">Game Export</p><h3>Review Roster Sync</h3><p class="sync-subtitle">The game CSV is the master roster. Review changes before updating Supabase.</p></div>
+        <button class="icon-btn" type="button" data-close-csv-sync>×</button>
+      </div>
+      <div class="sync-stats">
+        <div><strong id="syncCsvCount">0</strong><span>CSV members</span></div>
+        <div><strong id="syncMatchedCount">0</strong><span>Matched</span></div>
+        <div><strong id="syncAddedCount">0</strong><span>To add</span></div>
+        <div><strong id="syncRemovedCount">0</strong><span>To remove</span></div>
+      </div>
+      <div class="sync-note">IGN spelling, symbols, spaces, capitalization and Japanese characters will follow the CSV exactly. A blank in-game IGN is stored as <strong>_</strong> on the website. Removed members are also cleared from raid-party slots.</div>
+      <div id="syncChanges" class="sync-changes"></div>
+      <div class="modal-actions">
+        <button type="button" class="secondary-btn" data-close-csv-sync>Cancel</button>
+        <button id="confirmCsvSyncBtn" type="button" class="primary-btn">Confirm & Sync to Supabase</button>
+      </div>
+    </div>
+  </div>
 
   <div id="memberPicker" class="member-picker hidden" aria-hidden="true">
     <div class="picker-search-wrap">
