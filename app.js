@@ -12,8 +12,18 @@ const RAIDS = {
   mirrorWorld:{title:'Mirror World',groups:[['Elite Party',10],['Sub-Party A',8],['Sub-Party B',8],['Sub-Party C',8]]}
 };
 
+const SUPABASE_URL = window.ROTW_CONFIG?.SUPABASE_URL || '';
+const SUPABASE_ANON_KEY = window.ROTW_CONFIG?.SUPABASE_ANON_KEY || '';
+const GUILD_ID = window.ROTW_CONFIG?.GUILD_ID || 'rotw-main';
+const supabaseClient = (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase)
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  : null;
+
 let members = JSON.parse(localStorage.getItem('gm_members') || '[]');
 let assignments = JSON.parse(localStorage.getItem('gm_assignments') || '{}');
+let realtimeChannel = null;
+let remoteReady = false;
+let saveTimer = null;
 let editingId = null;
 let currentRaid = 'guildLeague';
 let selectedClass = null;
@@ -23,10 +33,80 @@ let activePickerButton = null;
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const iconPath = key => `resources/${key}.png`;
-const save = () => {
+function cacheLocal(){
   localStorage.setItem('gm_members', JSON.stringify(members));
   localStorage.setItem('gm_assignments', JSON.stringify(assignments));
+}
+
+async function pushStateToSupabase(){
+  if(!supabaseClient) return;
+  const payload={
+    id:GUILD_ID,
+    members,
+    assignments,
+    updated_at:new Date().toISOString()
+  };
+  const {error}=await supabaseClient.from('guild_state').upsert(payload,{onConflict:'id'});
+  if(error){
+    console.error('Supabase save failed:',error);
+    toast('Saved locally, but Supabase sync failed.');
+  }
+}
+
+const save = () => {
+  cacheLocal();
+  if(!supabaseClient) return;
+  clearTimeout(saveTimer);
+  saveTimer=setTimeout(()=>pushStateToSupabase(),120);
 };
+
+function applyRemoteState(row){
+  if(!row) return;
+  members=Array.isArray(row.members)?row.members:[];
+  assignments=row.assignments && typeof row.assignments==='object' && !Array.isArray(row.assignments) ? row.assignments : {};
+  cacheLocal();
+  renderMembers();
+  renderClassList();
+  renderRaid();
+}
+
+async function loadSharedState(){
+  if(!supabaseClient){
+    console.warn('Supabase is not configured. Using browser-local storage only.');
+    return;
+  }
+
+  const {data,error}=await supabaseClient.from('guild_state').select('id,members,assignments,updated_at').eq('id',GUILD_ID).maybeSingle();
+  if(error){
+    console.error('Supabase load failed:',error);
+    toast('Could not load shared guild data. Using local cache.');
+    return;
+  }
+
+  if(data){
+    applyRemoteState(data);
+  }else{
+    await pushStateToSupabase();
+  }
+  remoteReady=true;
+}
+
+function startRealtimeSync(){
+  if(!supabaseClient || realtimeChannel) return;
+  realtimeChannel=supabaseClient
+    .channel(`guild-state-${GUILD_ID}`)
+    .on('postgres_changes',{
+      event:'*',
+      schema:'public',
+      table:'guild_state',
+      filter:`id=eq.${GUILD_ID}`
+    },payload=>{
+      if(payload.new) applyRemoteState(payload.new);
+    })
+    .subscribe(status=>{
+      if(status==='SUBSCRIBED') console.log('Supabase realtime connected.');
+    });
+}
 
 function jobInfo(name){
   const j = JOBS.find(x=>x[0]===name);
@@ -398,7 +478,7 @@ async function importBackupFile(file){
     const text=await file.text();
     const parsed=JSON.parse(text);
     const clean=normalizeImportedBackup(parsed);
-    if(!confirm(`Import ${clean.members.length} members and replace the current guild data in this browser?`)) return;
+    if(!confirm(`Import ${clean.members.length} members and replace the current shared guild data?`)) return;
     members=clean.members;
     assignments=clean.assignments;
     save();
@@ -563,7 +643,13 @@ window.addEventListener('scroll',()=>{
   if(activePickerSlot) positionMemberPicker();
 },true);
 
-initJobSelect();
-renderMembers();
-renderClassList();
-renderRaid();
+async function initApp(){
+  initJobSelect();
+  renderMembers();
+  renderClassList();
+  renderRaid();
+  await loadSharedState();
+  startRealtimeSync();
+}
+
+initApp();
